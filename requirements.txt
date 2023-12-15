@@ -1,0 +1,15 @@
+bokeh
+dask[distributed]
+dask-ml
+gap-stat
+joblib
+jupyter-server-proxy
+matplotlib
+numpy
+optuna
+scikit-learn
+shap
+torch
+torchmetrics
+tqdm
+ydata-profiling[notebook,unicode]
