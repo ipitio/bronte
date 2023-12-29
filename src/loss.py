@@ -1,14 +1,13 @@
 import torch
-from torch import nn
 
 
-class DeepLoss(nn.Module):
+class DeepLoss:
     def __init__(self, criterion, num_out=[1]):
         super(DeepLoss, self).__init__()
         self.criterion = criterion
         self.num_out = num_out
 
-    def forward(self, preds, y):
+    def mean(self, preds, y):
         if not isinstance(preds, list):
             preds = [
                 preds

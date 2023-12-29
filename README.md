@@ -12,7 +12,7 @@ First we extract the data, from CSVs in this case, merge them, and perform EDA u
 
 ## Deep Learning
 
-This database is then read table-by-table, for each task and arch specified, and passed to the `Trainer`. Over the course of training, checkpoints, metrics, and the model's state and options from the best epoch will be saved to `runs/models`.
+This database is then read table-by-table, for each task and arch specified, and passed to `Bronte`. Over the course of training, checkpoints, metrics, and the model's state and options from the best epoch will be saved to `runs/models`.
 
 ### Framework
 
@@ -20,33 +20,43 @@ The framework is designed to be modular and extensible. It is based on `PyTorch`
 
 - `data`: Datasets
 - `loss`: Loss calculations
-- `arch`: Model architectures (i.e. layers)
-- `task`: Task-specific logic (e.g. preprocessing, evaluation)
-- `core`: Base model class, training loop
-- `main`: Model factory, starts training
+- `tune`: Tuner class
+- `core`: Model components
+- `main`: Model factory
 
-The `Trainer` class in the `main` module takes a dictionary of parameters, including task and arch, and creates a model. When data is passed to the `Trainer`, it splits it into features X and target(s) y, and passes these to the model's `fit` method, which then initializes the layers, optimizer, scheduler, criterion, scaler, datasets, and dataloaders, and starts training.
+The `Bronte` takes a dictionary of parameters, including task and arch, and creates a model. When data is passed to `Bronte`, it splits it into features X and target(s) y, and passes these to the model's `fit` method, which then initializes the layers, optimizer, scheduler, criterion, scaler, datasets, and dataloaders, and starts training.
+
+If you'd like to add a new task or arch, you can do so by creating a new class in the appropriate module.
+
+> #### Note
+>
+> You must initialize the layers not in `__init__`, but in `init_layers`, as this is used to (re)initialize the model's layers when (resuming) training.
 
 #### Supports
 
-- Hyperparameter tuning with `optuna` (incl. pruning)
-- State and layer checkpointing
-- Gradient accumulation, clipping, scaling
-- Mixed precision training with `autocast`
-- Distributed training with `dask` and `dask.distributed`
-- Feature importance with `shap`
-- Progress bars with `tqdm`
-- Single/multi input/output
+- CPU, GPU
+- Single and multiple inputs and outputs
+- Learning Rate scheduling
+- Hyperparameter tuning with pruning, `optuna`
+- Gradient:
+  - Accumulation
+  - Clipping
+  - Scaling
+- Training:
+  - Mixed Precision
+  - Series, continue/transfer learning
+  - Parallel, `dask`
+  - Distributed training, `dask.distributed`
+- Calculating feature importances, `shap`
 
 #### TODO
 
 - [ ] Logging with `tensorboard`
 - [ ] TPU support
-- [ ] More everything
+- [ ] More archs
 - [ ] Tests
 - [ ] Documentation
-- [ ] Resume from checkpoint
 
 ## Inference
 
-An example is provided at the end of the notebook of the `Trainer` being used to load trained models, which can be used to make predictions on new data.
+An example is provided at the end of the notebook of `Bronte` being used to load trained models, which can be used to make predictions on new data.
