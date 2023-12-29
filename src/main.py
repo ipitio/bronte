@@ -5,18 +5,11 @@ from .core.task import Classification, Regression
 
 
 class Bronte:
+    archs = {"ffn": FFN, "rnn": RNN}
 
-    archs = {
-        "ffn": FFN,
-        "rnn": RNN
-    }
+    tasks = {"class": Classification, "reg": Regression}
 
-    tasks = {
-        "class": Classification,
-        "reg": Regression
-    }
-
-    def __init__(self, options=None, path=None, full=False):
+    def __init__(self, options=None, path=None, full=True):
         super(Bronte, self).__init__()
         if options is None:
             options = {}
@@ -33,7 +26,6 @@ class Bronte:
         self.model = self.factory(task, arch)(options)
         if load:
             self.model = self.model.load(path, options, full=full)
-
 
     @staticmethod
     def factory(task, arch):

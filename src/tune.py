@@ -72,7 +72,7 @@ class Objective:
         self.model = self.model.load(self.model.first, self.model.options)
         self.model.trial = trial
         try:
-            self.model = self.model.learn()
+            self.model = self.model.iterate()
         except optuna.TrialPruned:
             raise
         except Exception:
@@ -80,11 +80,11 @@ class Objective:
                 traceback.print_exc()
             # raise optuna.TrialPruned
             return float("inf")
+        self.model = self.model.load()
         return self.model.best_loss or float("inf")
 
     def callback(self, study, trial):
         if study.best_trial == trial:
             self.model.trial = False
             self.model.options["tune_trials"] = 0
-            self.model.restart()
-            self.model.save(f"{self.model.epoch - 1}")
+            self.model.save(f"{int(self.model.first.split('.')[0]) + 1}.pt")

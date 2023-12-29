@@ -20,9 +20,7 @@ class FFN(Model):
         self.lin_layers = nn.ModuleList(
             [
                 nn.Linear(
-                    input_size
-                    if i == 0
-                    else self.options["fc_layers"][i - 1],
+                    input_size if i == 0 else self.options["fc_layers"][i - 1],
                     size,
                 ).to(self.options["device"])
                 for i, size in enumerate(self.options["fc_layers"])

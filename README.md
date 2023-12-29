@@ -12,7 +12,7 @@ First we extract the data, from CSVs in this case, merge them, and perform EDA u
 
 ## Deep Learning
 
-This database is then read table-by-table, for each task and arch specified, and passed to `Bronte`. Over the course of training, checkpoints, metrics, and the model's state and options from the best epoch will be saved to `runs/models`.
+This database is then read table-by-table, for each task and arch specified, and passed to `Bronte`. Over the course of training, checkpoints, metrics, and the model's state and options from the best epoch will be saved to `models/`.
 
 ### Framework
 
@@ -21,7 +21,7 @@ The framework is designed to be modular and extensible. It is based on `PyTorch`
 - `data`: Datasets
 - `loss`: Loss calculations
 - `tune`: Tuner class
-- `core`: Model components
+- `core`: Model components: base, task, arch
 - `main`: Model factory
 
 The `Bronte` takes a dictionary of parameters, including task and arch, and creates a model. When data is passed to `Bronte`, it splits it into features X and target(s) y, and passes these to the model's `fit` method, which then initializes the layers, optimizer, scheduler, criterion, scaler, datasets, and dataloaders, and starts training.
@@ -37,22 +37,24 @@ If you'd like to add a new task or arch, you can do so by creating a new class i
 - CPU, GPU
 - Single and multiple inputs and outputs
 - Learning Rate scheduling
-- Hyperparameter tuning with pruning, `optuna`
+- Hyperparameter tuning with `optuna`
+  - Persistent
+  - Pruning
 - Gradient:
   - Accumulation
   - Clipping
   - Scaling
 - Training:
   - Mixed Precision
-  - Series, continue/transfer learning
-  - Parallel, `dask`
-  - Distributed training, `dask.distributed`
-- Calculating feature importances, `shap`
+  - Persistent/Transfer Learning
+  - Parallel and Distributed with `dask`
+- Calculating feature importances with `shap`
 
 #### TODO
 
 - [ ] Logging with `tensorboard`
 - [ ] TPU support
+- [ ] Frontend + Flask
 - [ ] More archs
 - [ ] Tests
 - [ ] Documentation

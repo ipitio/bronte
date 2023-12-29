@@ -58,11 +58,12 @@ class Model(nn.Module, ABC):
         self.train_dl = None
         self.valid_dl = None
         self.test_dl = None
-        self.first = f"{self.epoch - 1}.pt"
+        self.first = f"-2.pt"
         self.action = "Training"
         self.output_dir = "models"
         self.output_dirs = {}
         self.typeof = ""
+        self.studies = "/".join([self.output_dir, "tuning.db"])
 
         # task
         self.options["task"] = ""
@@ -191,11 +192,11 @@ class Model(nn.Module, ABC):
         if path == "best":
             epochs = []
             for file in os.listdir(self.output_dirs["checkpoints"]):
-                if file.endswith(".pt") and file.split(".")[0].isdigit():
+                if file.endswith(".pt") and file.split(".")[0].lstrip("-").isdigit():
                     epochs.append(int(file.split(".")[0]))
             while epochs:
-                if self.load(f"{max(epochs)}.pt") is not None:
-                    self.epoch = max(epochs) + 1
+                if self.load("/".join([self.output_dirs["checkpoints"], f"{max(epochs)}.pt"])) is not None:
+                    self.epoch = max(max(epochs) + 1, self.epoch)
                     return self
                 epochs.remove(max(epochs))
             found = False
@@ -223,13 +224,16 @@ class Model(nn.Module, ABC):
                 del state["model"][k]
         self.load_state_dict(state["model"], False)
         for k, v in size_mismatched.items():
-            set_attr(
-                self,
-                k.split("."),
-                torch.nn.Parameter(
-                    v.resize_(self.state_dict()[k].size()), v.requires_grad
-                ).to(self.options["device"]),
-            )
+            try:
+                set_attr(
+                    self,
+                    k.split("."),
+                    torch.nn.Parameter(
+                        v.resize_(self.state_dict()[k].size()), v.requires_grad
+                    ).to(self.options["device"]),
+                )
+            except:
+                pass
 
         self.criterion = DeepLoss(self.options["criterion"], self.options["num_out"])
         self.optimizer = torch.optim.AdamW(
@@ -296,11 +300,16 @@ class Model(nn.Module, ABC):
     def restart(self, path=None, head=False):
         if path is None:
             path = self.first
+
+        # delete trials
+        if os.path.exists(self.studies):
+            os.remove(self.studies)
+
         # remove everything greater than first
         for file in os.listdir(self.output_dirs["checkpoints"]):
             if (
                 file.endswith(".pt")
-                and file.split(".")[0].isdigit()
+                and file.split(".")[0].lstrip("-").isdigit()
                 and int(file.split(".")[0]) > int(path.split(".")[0])
             ):
                 os.remove(os.path.join(self.output_dirs["checkpoints"], file))
@@ -330,7 +339,7 @@ class Model(nn.Module, ABC):
             self.epoch = 0
             self.best_loss = float("inf")
             self.fits = 0
-            self.first = f"{self.epoch - 1}.pt"
+            self.first = f"-2.pt"
             self.action = "Fine-tuning"
             if self.options["freeze"]:
                 for name, param in self.named_parameters():
@@ -510,41 +519,44 @@ class Model(nn.Module, ABC):
                 if not self.trial:
                     if self.options["verbose"]:
                         print("Validation loss improved; saving model...")
-                    self.first = f"{self.epoch - 1}.pt"
+                    self.first = f"{max(int(self.first.split('.')[0]) + 1, self.epoch - 1)}.pt"
                     self.save()
+                else:
+                    self.save(f"{int(self.first.split('.')[0]) + 1}.pt")
+
 
             with torch.no_grad():
                 torch.cuda.empty_cache()
 
         # Test the best model
-        if not self.trial:
-            if self.options["verbose"]:
-                print("Testing the best model...")
-            if self.load() is None:
-                return None
+        if not self.trial and self.options["verbose"]:
+            print("Testing the best model...")
+        if self.load() is None:
+            print("here")
+            return None
 
-            self.test_ds = DeepDataset(
-                self.X_test,
-                self.y_test,
-                self.options["rnn_seq_len"] if "RNN" in self.typeof else 0,
-                self.options["batch_size"],
-                self.options["device"],
-                self.options["n_workers"],
-                self.options["client"],
-                drop_last=self.options["drop_last"],
-            )
+        self.test_ds = DeepDataset(
+            self.X_test,
+            self.y_test,
+            self.options["rnn_seq_len"] if "RNN" in self.typeof else 0,
+            self.options["batch_size"],
+            self.options["device"],
+            self.options["n_workers"],
+            self.options["client"],
+            drop_last=self.options["drop_last"],
+        )
 
-            self.test_dl = DataLoader(
-                self.test_ds,
-                batch_size=None,
-                num_workers=0
-                if isinstance(self.X_test, dd.DataFrame)
-                else self.options["n_workers"],
-                # drop_last=True,
-                # pin_memory=self.options["use_cuda"],
-            )
+        self.test_dl = DataLoader(
+            self.test_ds,
+            batch_size=None,
+            num_workers=0
+            if isinstance(self.X_test, dd.DataFrame)
+            else self.options["n_workers"],
+            # drop_last=True,
+            # pin_memory=self.options["use_cuda"],
+        )
 
-            self.partial_iterate(self.test_dl)
+        self.partial_iterate(self.test_dl)
         with torch.no_grad():
             torch.cuda.empty_cache()
         gc.collect()
@@ -701,12 +713,15 @@ class Model(nn.Module, ABC):
                 print(f"Tuning {self.action} {model_target}")
             objective = Objective(self)
             study = optuna.create_study(
-                direction="minimize",
+                storage=f"sqlite:///{self.studies}",
                 sampler=optuna.samplers.TPESampler(),
                 pruner=optuna.pruners.HyperbandPruner(
                     objective.min_epochs,
                     objective.max_epochs,
                 ),
+                study_name=f"{self.typeof}_{self.name}_{self.fits}_{self.epoch}",
+                direction="minimize",
+                load_if_exists=self.options["resume"],
             )
             study.optimize(
                 objective,
@@ -717,12 +732,16 @@ class Model(nn.Module, ABC):
             )  # optimize the loss
             if self.load() is None:
                 return None
+            self.first = f"{max(int(self.first.split('.')[0]) + 1, self.epoch - 1)}.pt"
 
         self.fits += 1
         self.performance()
         self.importance()
-        self.save(f"{self.epoch - 1}.pt")
-        self.save(f"{self.output_dir}/{self.typeof}/{self.name}/{self.fits - 1}/model.pt", True)
+        self.save()
+        self.save(
+            f"{self.output_dir}/{self.typeof}/{self.name}/{self.fits - 1}/model.pt",
+            True,
+        )
 
         with torch.no_grad():
             torch.cuda.empty_cache()

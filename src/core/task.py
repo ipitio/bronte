@@ -33,7 +33,6 @@ from .base import Model
 
 
 class Classification(Model):
-
     def __init__(self):
         super(Classification, self).__init__()
         self.options["criterion"] = nn.MultiLabelMarginLoss(reduction="none")
@@ -134,6 +133,9 @@ class Classification(Model):
                         else self.predictions.flatten()
                     )
 
+                if not preds or not y:
+                    return
+
                 # Remove NaNs
                 y = y[~np.isnan(y)]
                 preds = preds[~np.isnan(preds)]
@@ -177,7 +179,9 @@ class Classification(Model):
                 plt.title(f"Confusion Matrix of {self.name} for {col}")
                 plt.xlabel("Predicted Labels")
                 plt.ylabel("True Labels")
-                plt.savefig("/".join([self.output_dirs["performance"], f"cm_{col}.png"]))
+                plt.savefig(
+                    "/".join([self.output_dirs["performance"], f"cm_{col}.png"])
+                )
                 if self.options["verbose"]:
                     plt.show()
 
@@ -246,14 +250,22 @@ class Regression(Model):
         if self is not None:
             length = min(len(self.labels), len(self.predictions))
             preds = (
-                torch.tensor(self.predictions[:length], device=self.options["device"])
-                .cpu()
+                torch.tensor(
+                    self.predictions[:length], device=self.options["device"]
+                ).cpu()
             ).squeeze()
             y = torch.tensor(self.labels[:length], device=self.options["device"]).cpu()
-            rmse = mean_squared_error(preds, y, False, len(self.target_var))
-            mae = mean_absolute_error(preds, y)
-            r2 = r2_score(preds, y)
-            corr = np.corrcoef(preds, y)[0, 1]
+            if preds.ndim == 0 or y.ndim == 0:
+                return
+            try:
+                rmse = mean_squared_error(preds, y, False, len(self.target_var))
+                mae = mean_absolute_error(preds, y)
+                r2 = r2_score(preds, y)
+                corr = np.corrcoef(preds, y)[0, 1]
+            except:
+                print("preds", preds)
+                print("y", y)
+                raise
 
             if self.options["verbose"]:
                 print(
