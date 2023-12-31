@@ -12,7 +12,7 @@ First we extract the data, from CSVs in this case, merge them, and perform EDA u
 
 ## Deep Learning
 
-This database is then read table-by-table, for each task and arch specified, and passed to `Bronte`. Over the course of training, checkpoints, metrics, and the model's state and options from the best epoch will be saved to `models/`.
+This database is then read table-by-table, for each task and arch specified, and passed to `Bronte`. Over the course of training, checkpoints of state and visuals of metrics and importances will be saved to `models/`.
 
 ### Framework
 
