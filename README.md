@@ -80,5 +80,9 @@ It is composed of the following modules:
 
 An example is provided at the end of the notebook of `Bronte` being used to load and fine-tune trained models, which can be used to make predictions on new data.
 
-    trainer = Bronte(path="path/to/model.pt")
+    if fine_tune:
+      trainer = Bronte(new_options, "path/to/model.pt")
+      trainer.fit(X_fine, y_fine)
+    else:
+      trainer = Bronte(path="path/to/model.pt")
     y_new = trainer.predict(X_new)
