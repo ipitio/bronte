@@ -167,6 +167,8 @@ class Model(nn.Module, ABC):
         if self.options["task"] and self.options["arch"]:
             self.typeof = " ".join([self.options["task"], self.options["arch"]])
 
+        return self
+
     def load(
         self,
         path="best",

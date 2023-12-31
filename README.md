@@ -33,7 +33,6 @@ It is composed of the following modules:
 
     trainer = Bronte(task | arch)
     trainer.fit(X, y)
-    y_new = trainer.predict(X_new)
 
 > #### Note
 >
@@ -41,8 +40,11 @@ It is composed of the following modules:
 
 #### Supports
 
-- CPU, GPU
-- Hyperparameter tuning with `optuna`
+- Processor:
+  - CPU
+  - GPU
+  - TPU (on colab)
+- Hyperparameter tuning with `optuna`:
   - Persistent
   - Pruning
 - Gradient:
@@ -60,7 +62,8 @@ It is composed of the following modules:
     - Fine-tuning
   - Parallel and Distributed with `dask`
 - Arch:
-  - FFN, RNN with Attention
+  - FFN
+  - RNN with Attention
   - Checkpointing (GPU-only)
 - Task:
   - Regression
@@ -70,7 +73,6 @@ It is composed of the following modules:
 #### TODO
 
 - [ ] Logging with `tensorboard`
-- [ ] TPU support
 - [ ] Frontend + Flask
 - [ ] More archs, tasks
 - [ ] Tests
@@ -80,9 +82,5 @@ It is composed of the following modules:
 
 An example is provided at the end of the notebook of `Bronte` being used to load and fine-tune trained models, which can be used to make predictions on new data.
 
-    if fine_tune:
-      trainer = Bronte(new_options, "path/to/model.pt")
-      trainer.fit(X_fine, y_fine)
-    else:
-      trainer = Bronte(path="path/to/model.pt")
+    trainer = Bronte(new_options, "path/to/model.pt")
     y_new = trainer.predict(X_new)
