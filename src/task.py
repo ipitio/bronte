@@ -29,7 +29,7 @@ from torchmetrics.functional.regression import (
     mean_squared_error,
     r2_score,
 )
-from .base import Model
+from .trainer.base import Model
 
 
 class Classification(Model):

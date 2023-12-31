@@ -16,9 +16,9 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.data import DataLoader
 from tqdm.notebook import trange, tqdm
-from ..data import DeepDataset
-from ..loss import DeepLoss
-from ..tune import Objective
+from .data import DeepDataset
+from .loss import DeepLoss
+from .tune import Objective
 
 # parallelization
 import dask.dataframe as dd
@@ -58,7 +58,6 @@ class Model(nn.Module, ABC):
         self.train_dl = None
         self.valid_dl = None
         self.test_dl = None
-        self.first = f"-2.pt"
         self.action = "Training"
         self.output_dir = "models"
         self.output_dirs = {}
@@ -195,7 +194,7 @@ class Model(nn.Module, ABC):
                 if file.endswith(".pt") and file.split(".")[0].lstrip("-").isdigit():
                     epochs.append(int(file.split(".")[0]))
             while epochs:
-                if self.load("/".join([self.output_dirs["checkpoints"], f"{max(epochs)}.pt"])) is not None:
+                if self.load(f"{max(epochs)}.pt") is not None:
                     self.epoch = max(max(epochs) + 1, self.epoch)
                     return self
                 epochs.remove(max(epochs))
@@ -268,7 +267,7 @@ class Model(nn.Module, ABC):
 
     def save(self, path=None, full=False):
         if path is None:
-            path = self.first
+            path = f"{self.epoch - 1}.pt"
         if not full:
             path = "/".join([self.output_dirs["checkpoints"], path])
         state = {
@@ -297,24 +296,15 @@ class Model(nn.Module, ABC):
         )
         return state
 
-    def restart(self, path=None, head=False):
-        if path is None:
-            path = self.first
-
+    def restart(self):
         # delete trials
         if os.path.exists(self.studies):
             os.remove(self.studies)
 
         # remove everything greater than first
         for file in os.listdir(self.output_dirs["checkpoints"]):
-            if (
-                file.endswith(".pt")
-                and file.split(".")[0].lstrip("-").isdigit()
-                and int(file.split(".")[0]) > int(path.split(".")[0])
-            ):
+            if file.endswith(".pt") and file.split(".")[0].lstrip("-").isdigit():
                 os.remove(os.path.join(self.output_dirs["checkpoints"], file))
-        if head:
-            os.remove(os.path.join(self.output_dirs["checkpoints"], path))
         return self
 
     def resume(self, name, restart=False):
@@ -339,14 +329,13 @@ class Model(nn.Module, ABC):
             self.epoch = 0
             self.best_loss = float("inf")
             self.fits = 0
-            self.first = f"-2.pt"
             self.action = "Fine-tuning"
             if self.options["freeze"]:
                 for name, param in self.named_parameters():
                     if name in self.options["freeze"]:
                         param.requires_grad = False
             if restart:
-                self.restart(head=True)
+                self.restart()
 
     def partial_fit(self, X, y, train=True, i=0):
         if train:
@@ -455,6 +444,7 @@ class Model(nn.Module, ABC):
             0 if self.fits == 0 else self.options["epochs"] * self.fits - self.epoch
         )
 
+        saved = False
         for _ in trange(end - skipped - self.epoch):
             # print("Loading data...")
             self.train_ds = DeepDataset(
@@ -511,50 +501,46 @@ class Model(nn.Module, ABC):
                 self.trial.report(avg_val_loss, self.epoch)
                 if self.trial.should_prune():
                     raise optuna.TrialPruned()
-            self.epoch += 1
             self.scheduler.step(avg_val_loss, self.epoch)
+            self.epoch += 1
             # If the validation losses is at a new minimum, save the model state
             if avg_val_loss < self.best_loss:
+                print(f"Loss decreased; saving model...")
                 self.best_loss = avg_val_loss
-                if not self.trial:
-                    if self.options["verbose"]:
-                        print("Validation loss improved; saving model...")
-                    self.first = f"{max(int(self.first.split('.')[0]) + 1, self.epoch - 1)}.pt"
-                    self.save()
-                else:
-                    self.save(f"{int(self.first.split('.')[0]) + 1}.pt")
-
-
+                self.save()
+                saved = True
             with torch.no_grad():
                 torch.cuda.empty_cache()
 
         # Test the best model
-        if not self.trial and self.options["verbose"]:
-            print("Testing the best model...")
-        if self.load() is None:
-            print("here")
-            return None
+        if saved:
+            if not self.trial and self.options["verbose"]:
+                print("Testing the best model...")
 
-        self.test_ds = DeepDataset(
-            self.X_test,
-            self.y_test,
-            self.options["rnn_seq_len"] if "RNN" in self.typeof else 0,
-            self.options["batch_size"],
-            self.options["device"],
-            self.options["n_workers"],
-            self.options["client"],
-            drop_last=self.options["drop_last"],
-        )
+            if self.load() is None:
+                raise Exception("No trained model found")
 
-        self.test_dl = DataLoader(
-            self.test_ds,
-            batch_size=None,
-            num_workers=0
-            if isinstance(self.X_test, dd.DataFrame)
-            else self.options["n_workers"],
-            # drop_last=True,
-            # pin_memory=self.options["use_cuda"],
-        )
+            self.test_ds = DeepDataset(
+                self.X_test,
+                self.y_test,
+                self.options["rnn_seq_len"] if "RNN" in self.typeof else 0,
+                self.options["batch_size"],
+                self.options["device"],
+                self.options["n_workers"],
+                self.options["client"],
+                drop_last=self.options["drop_last"],
+            )
+
+            self.test_dl = DataLoader(
+                self.test_ds,
+                batch_size=None,
+                num_workers=0
+                if isinstance(self.X_test, dd.DataFrame)
+                else self.options["n_workers"],
+                # drop_last=True,
+                # pin_memory=self.options["use_cuda"],
+            )
+            self.save()
 
         self.partial_iterate(self.test_dl)
         with torch.no_grad():
@@ -662,6 +648,8 @@ class Model(nn.Module, ABC):
         self.predictions = []
         self.feature_importances_ = []
         self.target_var = self.y.columns.tolist()
+        if not isinstance(self.target_var, list):
+            self.target_var = [self.target_var]
         self.resume(self.target_var, True)
 
         # Here, we're using test_size=0.2 in the first split to ensure that train_df is 60% of the original data,
@@ -708,9 +696,9 @@ class Model(nn.Module, ABC):
                 print(f"{resumed}{self.action} {model_target}")
             self.iterate()
         else:
-            self.save()
+            self.save("-1.pt")
             if self.options["verbose"]:
-                print(f"Tuning {self.action} {model_target}")
+                print(f"{resumed}Tuning {self.action} {model_target}")
             objective = Objective(self)
             study = optuna.create_study(
                 storage=f"sqlite:///{self.studies}",
@@ -719,7 +707,7 @@ class Model(nn.Module, ABC):
                     objective.min_epochs,
                     objective.max_epochs,
                 ),
-                study_name=f"{self.typeof}_{self.name}_{self.fits}_{self.epoch}",
+                study_name=f"{self.typeof} {self.name} {self.fits}.{self.epoch}",
                 direction="minimize",
                 load_if_exists=self.options["resume"],
             )
@@ -728,11 +716,11 @@ class Model(nn.Module, ABC):
                 self.options["tune_trials"],
                 gc_after_trial=True,
                 show_progress_bar=True,
-                callbacks=[objective.callback],
             )  # optimize the loss
-            if self.load() is None:
-                return None
-            self.first = f"{max(int(self.first.split('.')[0]) + 1, self.epoch - 1)}.pt"
+            if self.load("-2.pt") is None:
+                raise Exception("No tuned model found")
+            self.trial = False
+            self.options["tune_trials"] = 0
 
         self.fits += 1
         self.performance()

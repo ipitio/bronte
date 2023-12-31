@@ -1,4 +1,5 @@
 import optuna
+import os
 import traceback
 
 
@@ -7,6 +8,8 @@ class Objective:
         self.model = model
         self.min_epochs = 1
         self.max_epochs = max(20, self.model.options["epochs"] * 2)
+        self.best_loss = float("inf")
+        self.first = self.model.epoch - 1
 
     def __call__(self, trial):
         n_layers = trial.suggest_int(
@@ -69,22 +72,28 @@ class Objective:
                 self.model.options["batch_size"],
             )
 
-        self.model = self.model.load(self.model.first, self.model.options)
+        self.model = self.model.load("-1.pt", self.model.options)
         self.model.trial = trial
+
         try:
             self.model = self.model.iterate()
         except optuna.TrialPruned:
             raise
         except Exception:
-            if self.model.options["verbose"] > 1:
+            if self.model.options["verbose"]:
                 traceback.print_exc()
             # raise optuna.TrialPruned
             return float("inf")
-        self.model = self.model.load()
-        return self.model.best_loss or float("inf")
 
-    def callback(self, study, trial):
-        if study.best_trial == trial:
-            self.model.trial = False
-            self.model.options["tune_trials"] = 0
-            self.model.save(f"{int(self.model.first.split('.')[0]) + 1}.pt")
+        for file in os.listdir(self.model.output_dirs["checkpoints"]):
+            if (
+                file.endswith(".pt")
+                and file.split(".")[0].lstrip("-").isdigit()
+                and int(file.split(".")[0]) > self.first
+            ):
+                os.remove(os.path.join(self.model.output_dirs["checkpoints"], file))
+
+        if self.model.best_loss < self.best_loss and self.model.best_loss != 0:
+            self.best_loss = self.model.best_loss
+            self.model.save("-2.pt")
+        return self.model.best_loss or float("inf")

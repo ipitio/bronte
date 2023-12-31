@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from torch import nn
-from .base import Model
+from .trainer.base import Model
 
 
 class FFN(Model):

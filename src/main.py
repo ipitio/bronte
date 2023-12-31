@@ -1,7 +1,7 @@
 import os
 import torch
-from .core.arch import FFN, RNN
-from .core.task import Classification, Regression
+from .arch import FFN, RNN
+from .task import Classification, Regression
 
 
 class Bronte:
@@ -39,3 +39,6 @@ class Bronte:
     def fit(self, X, y):
         self.model = self.model.fit(X, y)
         return 0
+
+    def predict(self, X):
+        return self.model.predict(X)
