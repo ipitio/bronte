@@ -12,6 +12,7 @@ optuna
 scikit-learn
 shap
 sqlalchemy
+tensorboard
 torch
 torchmetrics
 tqdm

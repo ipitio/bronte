@@ -15,6 +15,7 @@ from torch import nn
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm.notebook import trange, tqdm
 from .data import DeepDataset
 from .loss import DeepLoss
@@ -63,6 +64,7 @@ class Model(nn.Module, ABC):
         self.output_dirs = {}
         self.typeof = ""
         self.studies = "/".join([self.output_dir, "tuning.db"])
+        self.writer = None
 
         # task
         self.options["task"] = ""
@@ -495,10 +497,14 @@ class Model(nn.Module, ABC):
 
             if not self.trial and self.options["verbose"]:
                 print(f"\nEpoch {self.epoch+1}\n--------\nTraining...")
-            self.partial_iterate(self.train_dl, True)
+            avg_train_loss = self.partial_iterate(self.train_dl, True)
+            if self.writer is not None:
+                self.writer.add_scalar("Loss/Train", avg_train_loss, self.epoch)
             if not self.trial and self.options["verbose"]:
                 print("Validating...")
             avg_val_loss = self.partial_iterate(self.valid_dl)
+            if self.writer is not None:
+                self.writer.add_scalar("Loss/Valid", avg_val_loss, self.epoch)
             if self.trial:
                 self.trial.report(avg_val_loss, self.epoch)
                 if self.trial.should_prune():
@@ -545,7 +551,9 @@ class Model(nn.Module, ABC):
             )
             self.save()
 
-        self.partial_iterate(self.test_dl)
+        avg_test_loss = self.partial_iterate(self.test_dl)
+        if self.writer is not None:
+            self.writer.add_scalar("Loss/Test", avg_test_loss, self.epoch - 1)
         with torch.no_grad():
             torch.cuda.empty_cache()
         gc.collect()
@@ -690,6 +698,7 @@ class Model(nn.Module, ABC):
         self.y_test = self.y_test.reset_index(drop=True)
 
         self.load("")
+        self.writer = SummaryWriter()
 
         model_target = f"{'a new' if not self.fits else 'the ' + str(self.name[:-1]) if len(self.name) > 1 else str(self.name[0])} {self.typeof} model to predict {self.target_var}..."
         if self.trial or self.options["tune_trials"] <= 0:
@@ -731,6 +740,9 @@ class Model(nn.Module, ABC):
             f"{self.output_dir}/{self.typeof}/{self.name}/{self.fits - 1}/model.pt",
             True,
         )
+
+        self.writer.flush()
+        self.writer.close()
 
         with torch.no_grad():
             torch.cuda.empty_cache()

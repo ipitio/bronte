@@ -61,6 +61,8 @@ It is composed of the following modules:
     - Parameter transfer
     - Fine-tuning
   - Parallel and Distributed with `dask`
+  - Progress bars with `tqdm`
+  - Logging with `tensorboard`
 - Arch:
   - FFN
   - RNN with Attention
@@ -72,7 +74,6 @@ It is composed of the following modules:
 
 #### TODO
 
-- [ ] Logging with `tensorboard`
 - [ ] Frontend + Flask
 - [ ] More archs, tasks
 - [ ] Tests
