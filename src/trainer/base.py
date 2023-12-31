@@ -505,7 +505,8 @@ class Model(nn.Module, ABC):
             self.epoch += 1
             # If the validation losses is at a new minimum, save the model state
             if avg_val_loss < self.best_loss:
-                print(f"Loss decreased; saving model...")
+                if not self.trial and self.options["verbose"]:
+                    print(f"Loss decreased; saving model...")
                 self.best_loss = avg_val_loss
                 self.save()
                 saved = True
@@ -515,7 +516,7 @@ class Model(nn.Module, ABC):
         # Test the best model
         if saved:
             if not self.trial and self.options["verbose"]:
-                print("Testing the best model...")
+                print(f"\nBest: Epoch {self.epoch - 1}\n--------\nTesting...")
 
             if self.load() is None:
                 raise Exception("No trained model found")
@@ -648,8 +649,6 @@ class Model(nn.Module, ABC):
         self.predictions = []
         self.feature_importances_ = []
         self.target_var = self.y.columns.tolist()
-        if not isinstance(self.target_var, list):
-            self.target_var = [self.target_var]
         self.resume(self.target_var, True)
 
         # Here, we're using test_size=0.2 in the first split to ensure that train_df is 60% of the original data,

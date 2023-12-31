@@ -10,6 +10,7 @@ class Objective:
         self.max_epochs = max(20, self.model.options["epochs"] * 2)
         self.best_loss = float("inf")
         self.first = self.model.epoch - 1
+        self.restart()
 
     def __call__(self, trial):
         n_layers = trial.suggest_int(
@@ -85,6 +86,14 @@ class Objective:
             # raise optuna.TrialPruned
             return float("inf")
 
+        self.restart()
+
+        if self.model.best_loss < self.best_loss and self.model.best_loss != 0:
+            self.best_loss = self.model.best_loss
+            self.model.save("-2.pt")
+        return self.model.best_loss or float("inf")
+
+    def restart(self):
         for file in os.listdir(self.model.output_dirs["checkpoints"]):
             if (
                 file.endswith(".pt")
@@ -92,8 +101,3 @@ class Objective:
                 and int(file.split(".")[0]) > self.first
             ):
                 os.remove(os.path.join(self.model.output_dirs["checkpoints"], file))
-
-        if self.model.best_loss < self.best_loss and self.model.best_loss != 0:
-            self.best_loss = self.model.best_loss
-            self.model.save("-2.pt")
-        return self.model.best_loss or float("inf")

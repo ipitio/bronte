@@ -78,7 +78,7 @@ It is composed of the following modules:
 
 ## Inference
 
-An example is provided at the end of the notebook of `Bronte` being used to load trained models, which can be used to make predictions on new data.
+An example is provided at the end of the notebook of `Bronte` being used to load and fine-tune trained models, which can be used to make predictions on new data.
 
     trainer = Bronte(path="path/to/model.pt")
     y_new = trainer.predict(X_new)
