@@ -531,7 +531,7 @@ class Model(nn.Module, ABC):
         # Test the best model
         if saved:
             if not self.trial and self.options["verbose"]:
-                print(f"\nBest: Epoch {self.epoch - 1}\n--------\nTesting...")
+                print(f"\nBest: Epoch {self.epoch}\n--------\nTesting...")
 
             if self.load() is None:
                 raise Exception("No trained model found")
