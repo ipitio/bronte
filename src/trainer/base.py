@@ -288,7 +288,14 @@ class Model(nn.Module, ABC):
             "instance": {
                 key: value
                 for key, value in self.__dict__.items()
-                if not key.startswith("__") and not callable(key) and key != "options"
+                # and key none of "options" or "writer"
+                if not key.startswith("__")
+                and not callable(key)
+                and key
+                not in [
+                    "options",
+                    "writer",
+                ]
             },
         }
         torch.save(
@@ -698,7 +705,7 @@ class Model(nn.Module, ABC):
         self.y_test = self.y_test.reset_index(drop=True)
 
         self.load("")
-        self.writer = SummaryWriter()
+        self.writer = SummaryWriter(f"models/{self.typeof}/{self.name}/{self.fits}/runs")
 
         model_target = f"{'a new' if not self.fits else 'the ' + str(self.name[:-1]) if len(self.name) > 1 else str(self.name[0])} {self.typeof} model to predict {self.target_var}..."
         if self.trial or self.options["tune_trials"] <= 0:
