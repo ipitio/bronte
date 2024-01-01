@@ -705,7 +705,9 @@ class Model(nn.Module, ABC):
         self.y_test = self.y_test.reset_index(drop=True)
 
         self.load("")
-        self.writer = SummaryWriter(f"models/{self.typeof}/{self.name}/{self.fits}/runs")
+        self.writer = SummaryWriter(
+            f"models/{self.typeof}/{self.name}/{self.fits}/runs"
+        )
 
         model_target = f"{'a new' if not self.fits else 'the ' + str(self.name[:-1]) if len(self.name) > 1 else str(self.name[0])} {self.typeof} model to predict {self.target_var}..."
         if self.trial or self.options["tune_trials"] <= 0:
