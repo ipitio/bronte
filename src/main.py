@@ -1,5 +1,6 @@
 import os
 import torch
+import traceback
 from .arch import FFN, RNN
 from .task import Classification, Regression
 
@@ -37,8 +38,13 @@ class Bronte:
         return Instance
 
     def fit(self, X, y):
-        self.model = self.model.fit(X, y)
-        return 0
+        try:
+            self.model = self.model.fit(X, y)
+            return 0
+        except Exception:
+            if self.model.options["verbose"]:
+                traceback.print_exc()
+            return 1
 
     def predict(self, X):
         return self.model.predict(X)
