@@ -65,6 +65,7 @@ class Model(nn.Module, ABC):
         self.typeof = ""
         self.studies = "/".join([self.output_dir, "tuning.db"])
         self.writer = None
+        self.best_epoch = 0
 
         # task
         self.options["task"] = ""
@@ -522,13 +523,14 @@ class Model(nn.Module, ABC):
                 if not self.trial and self.options["verbose"]:
                     print(f"Loss decreased; saving model...")
                 self.best_loss = avg_val_loss
+                self.best_epoch = self.epoch - 1
                 self.save()
             with torch.no_grad():
                 torch.cuda.empty_cache()
 
         # Test the best model
         if not self.trial and self.options["verbose"]:
-            print(f"\nBest: Epoch {self.epoch}\n--------\nTesting...")
+            print(f"\nBest: Epoch {self.best_epoch}\n--------\nTesting...")
 
         if self.load() is None:
             raise Exception("No trained model found")
