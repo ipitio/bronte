@@ -38,13 +38,14 @@ class Bronte:
         return Instance
 
     def fit(self, X, y):
-        try:
-            self.model = self.model.fit(X, y)
+        # try:
+        self.model = self.model.fit(X, y)
+        # except:
+        #    if self.model.options["verbose"]:
+        #        traceback.print_exc()
+        if self.model is not None:
             return 0
-        except Exception:
-            if self.model.options["verbose"]:
-                traceback.print_exc()
-            return 1
+        return 1
 
     def predict(self, X):
         return self.model.predict(X)

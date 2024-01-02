@@ -41,7 +41,7 @@ class Classification(Model):
         # Calculate the gap statistic to find an initial estimate for the number of clusters
         optimalK = OptimalK()
         best_k = optimalK(
-            data, cluster_array=np.arange(1, self.options["max_clusters"] + 1)
+            data.astype(float), cluster_array=np.arange(1, self.options["max_clusters"] + 1)
         )
 
         # Reshape data either using array.reshape(-1, 1) if data has a single feature or array.reshape(1, -1) if it contains a single sample.
