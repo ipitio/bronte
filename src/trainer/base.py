@@ -455,7 +455,6 @@ class Model(nn.Module, ABC):
             0 if self.fits == 0 else self.options["epochs"] * self.fits - self.epoch
         )
 
-        saved = False
         for _ in trange(end - skipped - self.epoch):
             # print("Loading data...")
             self.train_ds = DeepDataset(
@@ -524,39 +523,37 @@ class Model(nn.Module, ABC):
                     print(f"Loss decreased; saving model...")
                 self.best_loss = avg_val_loss
                 self.save()
-                saved = True
             with torch.no_grad():
                 torch.cuda.empty_cache()
 
         # Test the best model
-        if saved:
-            if not self.trial and self.options["verbose"]:
-                print(f"\nBest: Epoch {self.epoch}\n--------\nTesting...")
+        if not self.trial and self.options["verbose"]:
+            print(f"\nBest: Epoch {self.epoch}\n--------\nTesting...")
 
-            if self.load() is None:
-                raise Exception("No trained model found")
+        if self.load() is None:
+            raise Exception("No trained model found")
 
-            self.test_ds = DeepDataset(
-                self.X_test,
-                self.y_test,
-                self.options["rnn_seq_len"] if "RNN" in self.typeof else 0,
-                self.options["batch_size"],
-                self.options["device"],
-                self.options["n_workers"],
-                self.options["client"],
-                drop_last=self.options["drop_last"],
-            )
+        self.test_ds = DeepDataset(
+            self.X_test,
+            self.y_test,
+            self.options["rnn_seq_len"] if "RNN" in self.typeof else 0,
+            self.options["batch_size"],
+            self.options["device"],
+            self.options["n_workers"],
+            self.options["client"],
+            drop_last=self.options["drop_last"],
+        )
 
-            self.test_dl = DataLoader(
-                self.test_ds,
-                batch_size=None,
-                num_workers=0
-                if isinstance(self.X_test, dd.DataFrame)
-                else self.options["n_workers"],
-                # drop_last=True,
-                # pin_memory=self.options["use_cuda"],
-            )
-            self.save()
+        self.test_dl = DataLoader(
+            self.test_ds,
+            batch_size=None,
+            num_workers=0
+            if isinstance(self.X_test, dd.DataFrame)
+            else self.options["n_workers"],
+            # drop_last=True,
+            # pin_memory=self.options["use_cuda"],
+        )
+        self.save()
 
         avg_test_loss = self.partial_iterate(self.test_dl)
         if self.writer is not None:

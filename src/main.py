@@ -43,9 +43,9 @@ class Bronte:
         # except:
         #    if self.model.options["verbose"]:
         #        traceback.print_exc()
-        if self.model is not None:
-            return 0
-        return 1
+        #    self.model = None
+        # finally:
+        return 0 if self.model is not None else 1
 
     def predict(self, X):
         return self.model.predict(X)
