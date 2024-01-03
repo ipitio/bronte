@@ -15,18 +15,17 @@ class Bronte:
         if options is None:
             options = {}
 
-        load = False
         if path is not None and path.endswith(".pt") and os.path.exists(path):
             checkpoint = torch.load(path)
-            if not options:
-                options = checkpoint["options"]
-            load = True
-
-        task = self.tasks[options["task"]] if "task" in options else FFN
-        arch = self.archs[options["arch"]] if "arch" in options else Regression
-        self.model = self.factory(task, arch)(options)
-        if load:
+            prev = checkpoint["options"]
+            task = self.tasks[prev["task"]] if "task" in prev else FFN
+            arch = self.archs[prev["arch"]] if "arch" in prev else Regression
+            self.model = self.factory(task, arch)(prev)
             self.model = self.model.load(path, options, full=full)
+        else:
+            task = self.tasks[options["task"]] if "task" in options else FFN
+            arch = self.archs[options["arch"]] if "arch" in options else Regression
+            self.model = self.factory(task, arch)(options)
 
     @staticmethod
     def factory(task, arch):

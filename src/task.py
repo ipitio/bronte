@@ -41,7 +41,8 @@ class Classification(Model):
         # Calculate the gap statistic to find an initial estimate for the number of clusters
         optimalK = OptimalK()
         best_k = optimalK(
-            data.astype(float), cluster_array=np.arange(1, self.options["max_clusters"] + 1)
+            data.astype(float),
+            cluster_array=np.arange(1, self.options["max_clusters"] + 1),
         )
 
         # Reshape data either using array.reshape(-1, 1) if data has a single feature or array.reshape(1, -1) if it contains a single sample.
@@ -92,14 +93,14 @@ class Classification(Model):
             self.options["num_out"] = [len(y[col].unique()) for col in y.columns]
 
         # Remove highly correlated features
-        corr = np.corrcoef(X.values, rowvar=False)
+        """ corr = np.corrcoef(X.values, rowvar=False)
         corr_matrix = np.abs(corr)
         r, c = np.triu_indices(corr_matrix.shape[0], k=1)
         to_drop = set()
         for i, j in zip(r, c):
             if corr_matrix[i, j] > self.options["max_corr"]:
                 to_drop.add(j)
-        X.drop(columns=X.columns[list(to_drop)], inplace=True)
+        X.drop(columns=X.columns[list(to_drop)], inplace=True) """
 
         return X, y
 
@@ -133,7 +134,7 @@ class Classification(Model):
                         else self.predictions.flatten()
                     )
 
-                if not preds or not y:
+                if len(preds) == 0 or len(y) == 0:
                     return
 
                 # Remove NaNs
@@ -149,6 +150,16 @@ class Classification(Model):
                 num_classes = len(y.unique())
                 task = "multiclass"
 
+                # preds and y have to be non-negative
+                if preds.min() < 0 or y.min() < 0:
+                    smallest = min(preds.min(), y.min())
+                    preds -= smallest
+                    y -= smallest
+
+                # preds and y have to be integers
+                preds = preds.to(torch.int64)
+                y = y.to(torch.int64)
+
                 accuracy_score = accuracy(preds, y, task, num_classes=num_classes)
                 f1 = f1_score(preds, y, task, average="macro", num_classes=num_classes)
                 precision_score = precision(
@@ -159,9 +170,29 @@ class Classification(Model):
                 )
                 cm = confusion_matrix(preds, y, task, num_classes=num_classes)
 
-                # preds = preds.unsqueeze(1)
-                # preds = torch.cat([1 - preds, preds], dim=1)
-                # auroc_score = auroc(preds, y.to(torch.int64), task, num_classes=num_classes)
+                # preds should be one more dimension than y
+                if preds.ndim < y.ndim + 1:
+                    preds = preds.unsqueeze(y.ndim + 1 - preds.ndim)
+                if preds.ndim > y.ndim + 1:
+                    preds = preds.squeeze(preds.ndim - y.ndim - 1)
+
+                # preds.shape[1] should be equal to num_classes
+                if preds.shape[1] < num_classes:
+                    preds = torch.cat(
+                        [
+                            preds,
+                            torch.zeros(
+                                preds.shape[0], num_classes - preds.shape[1]
+                            ).to(preds.device),
+                        ],
+                        dim=1,
+                    ).to(preds.device)
+                if preds.shape[1] > num_classes:
+                    preds = preds[:, :num_classes]
+
+                auroc_score = auroc(
+                    preds, y.to(torch.int64), task, num_classes=num_classes
+                )
 
                 if self.options["verbose"]:
                     print(
@@ -170,7 +201,7 @@ class Classification(Model):
                         f"\tF1 Score: {f1}\n"
                         f"\tPrecision: {precision_score}\n"
                         f"\tRecall: {recall_score}\n"
-                        #       f"\tArea Under ROC Curve: {auroc_score}"
+                        f"\tArea Under ROC Curve: {auroc_score}"
                     )
 
                 # Plot the confusion matrix
@@ -189,7 +220,7 @@ class Classification(Model):
                 self.f1.append(float(f1))
                 self.precision.append(float(precision_score))
                 self.recall.append(float(recall_score))
-                # self.auroc.append(float(auroc_score) if auroc_score else 0)
+                self.auroc.append(float(auroc_score) if auroc_score else 0)
 
 
 class Regression(Model):
@@ -209,14 +240,14 @@ class Regression(Model):
 
         for lim in np.arange(self.options["max_corr"], 0, -0.01):
             # Remove highly correlated features
-            corr = np.corrcoef(X.values, rowvar=False)
+            """corr = np.corrcoef(X.values, rowvar=False)
             corr_matrix = np.abs(corr)
             r, c = np.triu_indices(corr_matrix.shape[0], k=1)
             to_drop = set()
             for i, j in zip(r, c):
                 if corr_matrix[i, j] > lim:
                     to_drop.add(j)
-            X_dropped = X.drop(columns=X.columns[list(to_drop)])
+            X_dropped = X.drop(columns=X.columns[list(to_drop)])"""
 
             # Define the transformations pipeline
             transformers = Pipeline(
@@ -234,11 +265,11 @@ class Regression(Model):
             )
             # Apply the transformations on X
             try:
-                X_transformed = transformers.fit_transform(X_dropped)
+                X_transformed = transformers.fit_transform(X)
+                X = pd.DataFrame(X_transformed, columns=X.columns)
+                break
             except np.linalg.LinAlgError:
-                continue
-            X = pd.DataFrame(X_transformed, columns=X_dropped.columns)
-            break
+                pass
 
         return X, y
 

@@ -320,24 +320,17 @@ class Model(nn.Module, ABC):
         return self
 
     def resume(self, name, restart=False):
+        appended = False
         if len(self.name) < 1 or self.name[-1] != self.target_var:
             self.name.append(name)
-
-        outputs = ["checkpoints", "importances", "performance"]
-        for output in outputs:
-            self.output_dirs[output] = (
-                f"{self.output_dir}/{output}"
-                if output == "checkpoints"
-                else f"{self.output_dir}/{self.typeof}/{self.name}/{self.fits}/{output}"
-            )
-            os.makedirs(self.output_dirs[output], exist_ok=True)
+            appended = True
 
         for root, dirs, _ in os.walk(self.output_dir):
             for folder in dirs:
                 if folder == "[[]]":
                     shutil.rmtree(f"{root}/{folder}", True)
 
-        if len(self.name) > 1 and self.name[-1] != self.target_var:  # transfer
+        if len(self.name) > 1 and appended:  # transfer
             self.epoch = 0
             self.best_loss = float("inf")
             self.fits = 0
@@ -348,6 +341,21 @@ class Model(nn.Module, ABC):
                         param.requires_grad = False
             if restart:
                 self.restart()
+
+        # remove greater than self.fits - 1
+        for root, dirs, _ in os.walk(f"{self.output_dir}/{self.typeof}/{self.name}"):
+            for folder in dirs:
+                if folder.lstrip("-").isdigit() and int(folder) >= self.fits:
+                    shutil.rmtree(f"{root}/{folder}", True)
+
+        outputs = ["checkpoints", "importances", "performance"]
+        for output in outputs:
+            self.output_dirs[output] = (
+                f"{self.output_dir}/{output}"
+                if output == "checkpoints"
+                else f"{self.output_dir}/{self.typeof}/{self.name}/{self.fits}/{output}"
+            )
+            os.makedirs(self.output_dirs[output], exist_ok=True)
 
     def partial_fit(self, X, y, train=True, i=0):
         if train:
@@ -456,6 +464,7 @@ class Model(nn.Module, ABC):
             0 if self.fits == 0 else self.options["epochs"] * self.fits - self.epoch
         )
 
+        orig_loss = self.best_loss
         for _ in trange(end - skipped - self.epoch):
             # print("Loading data...")
             self.train_ds = DeepDataset(
@@ -503,7 +512,7 @@ class Model(nn.Module, ABC):
             )
 
             if not self.trial and self.options["verbose"]:
-                print(f"\nEpoch {self.epoch+1}\n--------\nTraining...")
+                print(f"\nEpoch {self.epoch}\n--------\nTraining...")
             avg_train_loss = self.partial_iterate(self.train_dl, True)
             if self.writer is not None:
                 self.writer.add_scalar("Loss/Train", avg_train_loss, self.epoch)
@@ -532,7 +541,7 @@ class Model(nn.Module, ABC):
         if not self.trial and self.options["verbose"]:
             print(f"\nBest: Epoch {self.best_epoch}\n--------\nTesting...")
 
-        if self.load() is None:
+        if orig_loss > self.best_loss and self.load() is None:
             raise Exception("No trained model found")
 
         self.test_ds = DeepDataset(
@@ -642,15 +651,15 @@ class Model(nn.Module, ABC):
 
     def fit(self, X, y):
         resumed = ""
+        self.X, self.y = self.preprocess(X, y)
         if self.options["resume"] or self.options["restart"]:
-            self.resume(y.columns.tolist())
+            self.resume(self.y.columns.tolist())
             if self.options["restart"] or self.load() is None:
                 if self.options["restart"]:
                     self.restart()
                 for k, v in self.output_dirs.items():
                     if k != "checkpoints":
                         shutil.rmtree(v, True)
-                self.name = []
             elif self.options["resume"]:
                 if self.options["epochs"] * (self.fits + 1) - self.epoch <= 0:
                     if self.options["verbose"]:
@@ -708,7 +717,7 @@ class Model(nn.Module, ABC):
             f"models/{self.typeof}/{self.name}/{self.fits}/runs"
         )
 
-        model_target = f"{'a new' if not self.fits else 'the ' + str(self.name[:-1]) if len(self.name) > 1 else str(self.name[0])} {self.typeof} model to predict {self.target_var}..."
+        model_target = f"{'a new' if not self.fits and len(self.name) < 2 else 'the ' + str(self.name[:-1]) if len(self.name) > 1 else str(self.name[0])} {self.typeof} model to predict {self.target_var}..."
         if self.trial or self.options["tune_trials"] <= 0:
             if not self.trial and self.options["verbose"]:
                 print(f"{resumed}{self.action} {model_target}")
