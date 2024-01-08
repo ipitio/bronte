@@ -3,7 +3,6 @@ dask[distributed]
 dask-ml
 flask
 flask-sqlalchemy
-gap-stat
 joblib
 jupyter-server-proxy
 matplotlib

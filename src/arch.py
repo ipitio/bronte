@@ -7,7 +7,7 @@ from .trainer.base import Model
 
 class FFN(Model):
     def __init__(self):
-        super(FFN, self).__init__()
+        super().__init__()
         self.options["fc_layers"] = [64] * 3
         self.options["fc_dropout"] = [0.5] * 3
         self.options["num_out"] = [1] * 3
@@ -93,7 +93,7 @@ class FFN(Model):
 
 class Attention(nn.Module):
     def __init__(self, hidden_dim, method="dot", device="cpu"):
-        super(Attention, self).__init__()
+        super().__init__()
 
         self.method = method
         if method not in ["dot", "general", "concat"]:
@@ -156,7 +156,7 @@ class Attention(nn.Module):
 
 class RNN(Model):
     def __init__(self):
-        super(RNN, self).__init__()
+        super().__init__()
         self.options["rnn_type"] = "GRU"
         self.options["rnn_layers"] = 1
         self.options["rnn_dropout"] = 0.5

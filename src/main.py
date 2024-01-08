@@ -11,7 +11,7 @@ class Bronte:
     tasks = {"class": Classification, "reg": Regression}
 
     def __init__(self, options=None, path=None, full=True):
-        super(Bronte, self).__init__()
+        super().__init__()
         if options is None:
             options = {}
 
@@ -31,7 +31,7 @@ class Bronte:
     def factory(task, arch):
         class Instance(task, arch):
             def __init__(self, options={}):
-                super(Instance, self).__init__()
+                super().__init__()
                 self.configure(options)
 
         return Instance

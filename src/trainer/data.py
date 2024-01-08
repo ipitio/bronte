@@ -18,7 +18,7 @@ class DeepDataset(IterableDataset):
         shuffle=False,
         drop_last=False,
     ):
-        super(DeepDataset, self).__init__()
+        super().__init__()
         self.X = X
         self.y = y
         self.sequence_length = sequence_length

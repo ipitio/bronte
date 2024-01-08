@@ -28,7 +28,7 @@ from dask_ml.model_selection import train_test_split
 
 class Model(nn.Module, ABC):
     def __init__(self):
-        super(Model, self).__init__()
+        super().__init__()
         self.options = {}
         self.trial = False
         self.labels = []
@@ -72,7 +72,7 @@ class Model(nn.Module, ABC):
         self.options["sample_size"] = 0
         self.options["verbose"] = 0
         self.options["targets"] = []
-        self.options["max_corr"] = 0.95
+        self.options["max_corr"] = 1.0
         self.options["max_clusters"] = 10
         self.options["n_workers"] = -1
         self.options["colab"] = False
@@ -782,7 +782,7 @@ class Model(nn.Module, ABC):
 
 class SingleInput(nn.Module):
     def __init__(self, model, i):
-        super(SingleInput, self).__init__()
+        super().__init__()
         self.model = model
         self.i = i
 

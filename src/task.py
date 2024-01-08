@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import pandas as pd
-from gap_statistic import OptimalK
 from sklearn.cluster import KMeans
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import silhouette_score
@@ -34,21 +33,14 @@ from .trainer.base import Model
 
 class Classification(Model):
     def __init__(self):
-        super(Classification, self).__init__()
+        super().__init__()
         self.options["criterion"] = nn.MultiLabelMarginLoss(reduction="none")
 
     def bins(self, data):
-        # Calculate the gap statistic to find an initial estimate for the number of clusters
-        optimalK = OptimalK()
-        best_k = optimalK(
-            data.astype(float),
-            cluster_array=np.arange(1, self.options["max_clusters"] + 1),
-        )
-
         # Reshape data either using array.reshape(-1, 1) if data has a single feature or array.reshape(1, -1) if it contains a single sample.
         data = data.values.reshape(-1, 1)
 
-        # Refine the estimate using Silhouette Analysis
+        # estimate using Silhouette Analysis
         silhouette_scores = []
         for k in range(2, self.options["max_clusters"] + 1):
             km = KMeans(n_clusters=k, random_state=42, n_init="auto", algorithm="auto")
@@ -56,15 +48,7 @@ class Classification(Model):
             silhouette_avg = silhouette_score(data, labels)
             silhouette_scores.append(silhouette_avg)
 
-        optimal_k_silhouette = (
-            np.argmax(silhouette_scores) + 2
-        )  # Adding 2 because range starts at 2
-
-        # Select the best solution by combining both methods
-        # Here we take a simple average of the two k values, but you can choose a more complex method
-        best_k = int(np.round((best_k + optimal_k_silhouette) / 2))
-
-        return best_k
+        return np.argmax(silhouette_scores) + 2  # Adding 2 because range starts at 2
 
     def preprocess(self, X, y):
         if y is not None:
@@ -93,22 +77,24 @@ class Classification(Model):
             self.options["num_out"] = [len(y[col].unique()) for col in y.columns]
 
         # Remove highly correlated features
-        """ corr = np.corrcoef(X.values, rowvar=False)
+        corr = np.corrcoef(X.values, rowvar=False)
         corr_matrix = np.abs(corr)
         r, c = np.triu_indices(corr_matrix.shape[0], k=1)
         to_drop = set()
         for i, j in zip(r, c):
             if corr_matrix[i, j] > self.options["max_corr"]:
                 to_drop.add(j)
-        X.drop(columns=X.columns[list(to_drop)], inplace=True) """
+        X.drop(columns=X.columns[list(to_drop)], inplace=True)
 
         return X, y
 
     def score(self, X, y):
-        self.accuracy = accuracy(
-            self.predict(X), y, "multiclass", num_classes=len(y.unique())
-        )
-        return self.accuracy
+        return [
+            accuracy(
+                self.predict(X), y, "multiclass", num_classes=self.options["num_out"][i]
+            ).item()
+            for i, _ in enumerate(self.y.columns)
+        ].mean()
 
     def performance(self):
         if self is not None:
@@ -117,7 +103,7 @@ class Classification(Model):
             self.precision = []
             self.recall = []
             self.auroc = []
-            for col in self.y.columns:
+            for i, col in enumerate(self.y.columns):
                 if len(self.y.columns) > 1:
                     index = self.y.columns.get_loc(col)
                     y = self.labels[:, index] if self.labels.ndim > 1 else self.labels
@@ -127,19 +113,18 @@ class Classification(Model):
                         else self.predictions
                     )
                 else:
-                    y = self.labels if self.labels.ndim > 1 else self.labels.flatten()
+                    y = self.labels.flatten() if self.labels.ndim > 1 else self.labels
                     preds = (
-                        self.predictions
+                        self.predictions.flatten()
                         if self.predictions.ndim > 1
-                        else self.predictions.flatten()
+                        else self.predictions
                     )
 
                 if len(preds) == 0 or len(y) == 0:
                     return
 
-                # Remove NaNs
-                y = y[~np.isnan(y)]
-                preds = preds[~np.isnan(preds)]
+                # scale pred to number of classes and round to nearest integer
+                preds = np.rint(preds * (self.options["num_out"][i] - 1))
 
                 length = min(len(y), len(preds))
                 preds = torch.tensor(
@@ -147,7 +132,7 @@ class Classification(Model):
                 ).cpu()
                 y = torch.tensor(y[:length], device=self.options["device"]).cpu()
 
-                num_classes = len(y.unique())
+                num_classes = self.options["num_out"][i]
                 task = "multiclass"
 
                 # preds and y have to be non-negative
@@ -225,7 +210,7 @@ class Classification(Model):
 
 class Regression(Model):
     def __init__(self):
-        super(Regression, self).__init__()
+        super().__init__()
         self.options["criterion"] = nn.HuberLoss(reduction="none")
 
     def preprocess(self, X, y):
@@ -240,14 +225,14 @@ class Regression(Model):
 
         for lim in np.arange(self.options["max_corr"], 0, -0.01):
             # Remove highly correlated features
-            """corr = np.corrcoef(X.values, rowvar=False)
+            corr = np.corrcoef(X.values, rowvar=False)
             corr_matrix = np.abs(corr)
             r, c = np.triu_indices(corr_matrix.shape[0], k=1)
             to_drop = set()
             for i, j in zip(r, c):
                 if corr_matrix[i, j] > lim:
                     to_drop.add(j)
-            X_dropped = X.drop(columns=X.columns[list(to_drop)])"""
+            X_dropped = X.drop(columns=X.columns[list(to_drop)])
 
             # Define the transformations pipeline
             transformers = Pipeline(
