@@ -30,12 +30,12 @@ It is composed of the following modules:
 ### Training
 
     trainer = Bronte(task | arch)
-    trainer.fit(X, y)
+    trainer.fit(data)
 
 ### Inference
 
-    trainer = Bronte(optional_new_options, path="model.pt")
-    y_new = trainer.predict(X_new)
+    trainer = Bronte(path="model.pt")
+    y = trainer.predict(X)
 
 ## Features
 
@@ -43,15 +43,15 @@ It is composed of the following modules:
   - (C/G/T)PU
   - Persistent
   - Mixed Precision
-  - Single- and multi-input and -output
+  - Multi-task
   - Model and state checkpointing
   - Learning Rate scheduling
   - Transfer Learning
+  - Gradient accumulation and scaling
   - Parallel and Distributed with `dask`
   - Hyperparameter tuning with `optuna`
   - Calculating feature importances with `shap`
   - Logging with `tensorboard`
-  - Gradient accumulation and scaling
 - Tasks:
   - Regression
   - Classification
@@ -67,7 +67,7 @@ It is composed of the following modules:
 
 ## Example
 
-The notebook `bronte.ipynb` features an ETL Pipeline for, and Deep Learning using, the modular and extensible `Bronte` framework, with an example dataset of Basketball statistics.
+The notebook `basketball.ipynb` features an ETL Pipeline for, and Deep Learning using, the modular and extensible `Bronte` framework, with an example dataset of Basketball statistics.
 
 ### ETL Pipeline
 

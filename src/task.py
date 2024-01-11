@@ -42,21 +42,23 @@ class Classification(Model):
 
         # estimate using Silhouette Analysis
         silhouette_scores = []
-        for k in range(2, self.options["max_clusters"] + 1):
+        for k in range(2, min(self.options["max_clusters"] + 1, len(data))):
             km = KMeans(n_clusters=k, random_state=42, n_init="auto", algorithm="auto")
             labels = km.fit_predict(data)
             silhouette_avg = silhouette_score(data, labels)
             silhouette_scores.append(silhouette_avg)
 
-        return np.argmax(silhouette_scores) + 2  # Adding 2 because range starts at 2
+        return np.argmax(silhouette_scores) + 2
 
     def preprocess(self, X, y):
         if y is not None:
-            for col in y.columns:
+            self.options["num_out"] = []
+            for i, col in enumerate(y.columns):
                 if y[col].dtype == "object":
                     # Encode categorical targets
                     le = LabelEncoder()
                     y[col] = le.fit_transform(y[col].values)
+                    self.options["num_out"].append(len(le.classes_))
                 else:
                     optimal_n = self.bins(y[col])
                     if y[col].dtype == "float" or (
@@ -72,9 +74,10 @@ class Classification(Model):
                             .astype(int)
                             .flatten()
                         )
-
-            # make self.options["num_out"] a list where each element is the number of unique values in each column of y
-            self.options["num_out"] = [len(y[col].unique()) for col in y.columns]
+                        self.options["num_out"].append(optimal_n)
+                    else:
+                        # Otherwise, use the number of unique values as the number of classes
+                        self.options["num_out"].append(len(y[col].unique()))
 
         # Remove highly correlated features
         corr = np.corrcoef(X.values, rowvar=False)
@@ -124,7 +127,7 @@ class Classification(Model):
                     return
 
                 # scale pred to number of classes and round to nearest integer
-                preds = np.rint(preds * (self.options["num_out"][i] - 1))
+                preds = np.rint(preds * (len(np.unique(y)) - 1))
 
                 length = min(len(y), len(preds))
                 preds = torch.tensor(
@@ -132,7 +135,7 @@ class Classification(Model):
                 ).cpu()
                 y = torch.tensor(y[:length], device=self.options["device"]).cpu()
 
-                num_classes = self.options["num_out"][i]
+                num_classes = len(np.unique(y))
                 task = "multiclass"
 
                 # preds and y have to be non-negative

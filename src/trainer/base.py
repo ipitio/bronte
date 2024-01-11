@@ -1,4 +1,5 @@
 import gc
+import logging
 import os
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,14 +17,32 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from torch.nn.utils.clip_grad import clip_grad_norm_
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
-from tqdm.notebook import trange, tqdm
+from tqdm import trange, tqdm
 from .data import DeepDataset
 from .loss import DeepLoss
 from .tune import Objective
 
 # parallelization
+import joblib
+import dask.config as dc
 import dask.dataframe as dd
+from dask.distributed import Client
 from dask_ml.model_selection import train_test_split
+
+try:
+    import torch_xla
+    import torch_xla.core.xla_model as xm
+
+    tpu = xm.xla_device() is not None
+except:
+    tpu = False
+
+levels = [
+    "critical",
+    "error",
+    "warn",
+    "info",
+]
 
 
 class Model(nn.Module, ABC):
@@ -77,7 +96,7 @@ class Model(nn.Module, ABC):
         self.options["max_clusters"] = 10
         self.options["n_workers"] = -1
         self.options["colab"] = False
-        self.options["num_out"] = 1
+        self.options["num_out"] = [1]
 
         # arch
         self.options["arch"] = ""
@@ -90,6 +109,7 @@ class Model(nn.Module, ABC):
         self.options["batch_size"] = 64
         self.options["epochs"] = 10
         self.options["patience"] = 0
+        self.options["cpu"] = True
         self.options["device"] = "cpu"
         self.options["use_cuda"] = False
         self.options["n_workers"] = 0
@@ -97,7 +117,7 @@ class Model(nn.Module, ABC):
         self.options["accumulate"] = 1
         self.options["norm_clip"] = 1.0
         self.options["grad_scaling"] = False
-        self.options["autocast"] = torch.float32
+        self.options["autocast"] = False
         self.options["init_scale"] = 2**16
         self.options["growth_factor"] = 2
         self.options["backoff_factor"] = 0.5
@@ -141,25 +161,26 @@ class Model(nn.Module, ABC):
         self.options.update(options)
 
         self.options["accumulate"] = max(self.options["accumulate"], 1)
-
-        self.options["device"] = (
-            "cuda"
-            if self.options["use_cuda"]
-            else "cpu"
-            if torch.cuda.is_available()
-            else "cpu"
-        )
-        self.options["use_cuda"] = (
-            self.options["device"] != "cpu" and self.options["use_cuda"]
-        )
+        self.options["use_cuda"] = not self.options["cpu"] and torch.cuda.is_available()
         self.options["use_checkpoint"] = (
             self.options["use_checkpoint"] and self.options["use_cuda"]
         )
         self.options["grad_scaling"] = (
             self.options["grad_scaling"] and self.options["use_cuda"]
         )
-        self.options["autocast"] = (
-            torch.float16 if self.options["use_cuda"] else torch.bfloat16
+        if self.options["autocast"]:
+            if self.options["autocast"] != torch.float32:
+                self.options["autocast"] = (
+                    torch.float16 if self.options["use_cuda"] else torch.bfloat16
+                )
+        else:
+            self.options["autocast"] = torch.float32
+        self.options["device"] = (
+            "cpu"
+            if not self.options["use_cuda"]
+            else xm.xla_device()
+            if tpu
+            else "cuda"
         )
 
         self.options["n_workers"] = (
@@ -356,7 +377,8 @@ class Model(nn.Module, ABC):
                 if output == "checkpoints"
                 else f"{self.output_dir}/{self.typeof}/{self.name}/{self.fits}/{output}"
             )
-            os.makedirs(self.output_dirs[output], exist_ok=True)
+            if restart:
+                os.makedirs(self.output_dirs[output], exist_ok=True)
 
     def partial_fit(self, X, y, train=True, i=0):
         if train:
@@ -682,95 +704,108 @@ class Model(nn.Module, ABC):
         self.target_var = self.y.columns.tolist()
         self.resume(self.target_var, True)
 
-        # Here, we're using test_size=0.2 in the first split to ensure that train_df is 60% of the original data,
-        # valid_df is 20%, and test_df (the hold-out set) is also 20%.
-        # print("Splitting into train, validation, and test sets...")
-        X_temp, self.X_test, y_temp, self.y_test = train_test_split(
-            self.X,
-            self.y,
-            test_size=0.2,
-            shuffle=not self.options["timeseries"],
-            random_state=42,
+        self.options["client"] = Client(
+            n_workers=self.options["n_workers"], silence_logs=logging.CRITICAL
         )
-
-        self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(
-            X_temp,
-            y_temp,
-            test_size=0.25,
-            shuffle=not self.options["timeseries"],
-            random_state=42,
-        )
-
-        # If the seed is set, the same sequence of rows will be selected each time.
-        if isinstance(self.X_train, pd.DataFrame):
-            self.X_train = dd.from_pandas(self.X_train, self.options["n_workers"])
-            self.y_train = dd.from_pandas(self.y_train, self.options["n_workers"])
-            self.X_valid = dd.from_pandas(self.X_valid, self.options["n_workers"])
-            self.y_valid = dd.from_pandas(self.y_valid, self.options["n_workers"])
-            self.X_test = dd.from_pandas(self.X_test, self.options["n_workers"])
-            self.y_test = dd.from_pandas(self.y_test, self.options["n_workers"])
-
-        # reset the index of the dataframes
-        self.X_train = self.X_train.reset_index(drop=True)
-        self.y_train = self.y_train.reset_index(drop=True)
-        self.X_valid = self.X_valid.reset_index(drop=True)
-        self.y_valid = self.y_valid.reset_index(drop=True)
-        self.X_test = self.X_test.reset_index(drop=True)
-        self.y_test = self.y_test.reset_index(drop=True)
-
-        self.load("")
-        self.writer = SummaryWriter(
-            f"models/{self.typeof}/{self.name}/{self.fits}/runs"
-        )
-
-        model_target = f"{'a new' if not self.fits and len(self.name) < 2 else 'the ' + str(self.name[:-1]) if len(self.name) > 1 else str(self.name[0])} {self.typeof} model to predict {self.target_var}..."
-        if self.trial or self.options["tune_trials"] <= 0:
-            if not self.trial and self.options["verbose"]:
-                print(f"{resumed}{self.action} {model_target}")
-            self.iterate()
-        else:
-            self.save("-1.pt")
-            if self.options["verbose"]:
-                print(f"{resumed}Tuning {self.action} {model_target}")
-            objective = Objective(self)
-            study = optuna.create_study(
-                storage=f"sqlite:///{self.studies}",
-                sampler=optuna.samplers.TPESampler(),
-                pruner=optuna.pruners.HyperbandPruner(
-                    objective.min_epochs,
-                    objective.max_epochs,
-                ),
-                study_name=f"{self.typeof} {self.name} {self.fits}.{self.epoch}",
-                direction="minimize",
-                load_if_exists=self.options["resume"],
+        if self.options["client"] is not None and not self.options["colab"]:
+            print(
+                f'Dask dashboard is available at {self.options["client"].dashboard_link}'
             )
-            study.optimize(
-                objective,
-                self.options["tune_trials"],
-                gc_after_trial=True,
-                show_progress_bar=True,
-            )  # optimize the loss
-            if self.load("-2.pt") is None:
-                raise Exception("No tuned model found")
-            self.trial = False
-            self.options["tune_trials"] = 0
+        dc.set({"logging.distributed": levels[self.options["verbose"]]})
+        with joblib.parallel_backend("dask"):
+            # Here, we're using test_size=0.2 in the first split to ensure that train_df is 60% of the original data,
+            # valid_df is 20%, and test_df (the hold-out set) is also 20%.
+            # print("Splitting into train, validation, and test sets...")
+            X_temp, self.X_test, y_temp, self.y_test = train_test_split(
+                self.X,
+                self.y,
+                test_size=0.2,
+                shuffle=not self.options["timeseries"],
+                random_state=42,
+            )
 
-        self.fits += 1
-        self.performance()
-        if self.options["importance"]:
-            self.importance()
-        self.save()
-        self.save(
-            f"{self.output_dir}/{self.typeof}/{self.name}/{self.fits - 1}/model.pt",
-            True,
-        )
+            self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(
+                X_temp,
+                y_temp,
+                test_size=0.25,
+                shuffle=not self.options["timeseries"],
+                random_state=42,
+            )
 
-        self.writer.flush()
-        self.writer.close()
+            # If the seed is set, the same sequence of rows will be selected each time.
+            if isinstance(self.X_train, pd.DataFrame):
+                self.X_train = dd.from_pandas(self.X_train, self.options["n_workers"])
+                self.y_train = dd.from_pandas(self.y_train, self.options["n_workers"])
+                self.X_valid = dd.from_pandas(self.X_valid, self.options["n_workers"])
+                self.y_valid = dd.from_pandas(self.y_valid, self.options["n_workers"])
+                self.X_test = dd.from_pandas(self.X_test, self.options["n_workers"])
+                self.y_test = dd.from_pandas(self.y_test, self.options["n_workers"])
 
-        with torch.no_grad():
-            torch.cuda.empty_cache()
-        gc.collect()
+            # reset the index of the dataframes
+            self.X_train = self.X_train.reset_index(drop=True)
+            self.y_train = self.y_train.reset_index(drop=True)
+            self.X_valid = self.X_valid.reset_index(drop=True)
+            self.y_valid = self.y_valid.reset_index(drop=True)
+            self.X_test = self.X_test.reset_index(drop=True)
+            self.y_test = self.y_test.reset_index(drop=True)
+
+            self.load("")
+            self.writer = SummaryWriter(
+                f"models/{self.typeof}/{self.name}/{self.fits}/runs"
+            )
+
+            model_target = f"{'a new' if not self.fits and len(self.name) < 2 else 'the ' + str(self.name[:-1]) if len(self.name) > 1 else str(self.name[0])} {self.typeof} model to predict {self.target_var}..."
+            if self.trial or self.options["tune_trials"] <= 0:
+                if not self.trial and self.options["verbose"]:
+                    print(f"{resumed}{self.action} {model_target}")
+                self.iterate()
+            else:
+                self.save("-1.pt")
+                if self.options["verbose"]:
+                    print(f"{resumed}Tuning {self.action} {model_target}")
+                objective = Objective(self)
+                study = optuna.create_study(
+                    storage=f"sqlite:///{self.studies}",
+                    sampler=optuna.samplers.TPESampler(),
+                    pruner=optuna.pruners.HyperbandPruner(
+                        objective.min_epochs,
+                        objective.max_epochs,
+                    ),
+                    study_name=f"{self.typeof} {self.name} {self.fits}.{self.epoch}",
+                    direction="minimize",
+                    load_if_exists=self.options["resume"],
+                )
+                study.optimize(
+                    objective,
+                    self.options["tune_trials"],
+                    gc_after_trial=True,
+                    show_progress_bar=True,
+                )  # optimize the loss
+                if self.load("-2.pt") is None:
+                    raise Exception("No tuned model found")
+                self.trial = False
+                self.options["tune_trials"] = 0
+
+            self.fits += 1
+            self.performance()
+            if self.options["importance"]:
+                self.importance()
+            self.save()
+            self.save(
+                f"{self.output_dir}/{self.typeof}/{self.name}/{self.fits - 1}/model.pt",
+                True,
+            )
+
+            if self.options["client"] is not None:
+                self.options["client"].close()
+                self.options["client"] = None
+
+            self.writer.flush()
+            self.writer.close()
+
+            with torch.no_grad():
+                torch.cuda.empty_cache()
+            gc.collect()
         return self
 
     def predict(self, X):
