@@ -54,7 +54,7 @@ class Objective:
             self.model.options["fc_dropout"] = [
                 trial.suggest_float(f"ff_dropout_{i}", 0, 1) for i in range(n_layers)
             ]
-        if "RNN" in self.model.typeof:
+        if "rnn" in self.model.typeof:
             self.model.options["rnn_type"] = trial.suggest_categorical(
                 "rnn_type", ["LSTM", "GRU"]
             )

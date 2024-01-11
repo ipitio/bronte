@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from torch import nn
@@ -105,34 +106,28 @@ class Attention(nn.Module):
 
         match (method):
             case "general":
-                self.attn = nn.Linear(self.hidden_dim, hidden_dim).to(device)
+                self.attn = nn.Linear(hidden_dim, hidden_dim).to(device)
             case "concat":
-                self.attn = nn.Linear(self.hidden_dim * 2, hidden_dim).to(device)
+                self.attn = nn.Linear(hidden_dim * 2, hidden_dim).to(device)
                 self.v = nn.Parameter(torch.FloatTensor(hidden_dim)).to(device)
 
     def forward(self, hidden, encoder_outputs):
-        encoder_output_dim = encoder_outputs.size(2)
+        hidden_dim = encoder_outputs.size(2)
 
         # Check if we need to apply a linear transformation
-        if self.hidden_dim != encoder_output_dim:
+        if hidden.size(-1) != hidden_dim:
             # Check if an appropriately sized hidden_transform layer exists in the cache
-            if encoder_output_dim not in self.hidden_transform_cache:
+            if hidden_dim not in self.hidden_transform_cache:
                 # If not, create and cache it
-                self.hidden_transform_cache[encoder_output_dim] = nn.Linear(
-                    self.hidden_dim, encoder_output_dim
+                self.hidden_transform_cache[hidden_dim] = nn.Linear(
+                    hidden.size(-1), hidden_dim  # Use the current hidden size
                 ).to(self.device)
             # Use the cached layer
-            hidden_transform = self.hidden_transform_cache[encoder_output_dim]
+            hidden_transform = self.hidden_transform_cache[hidden_dim]
             hidden = hidden_transform(hidden)
 
         # Ensure hidden has the same number of dimensions as encoder_outputs
-        if len(hidden.size()) < len(encoder_outputs.size()):
-            hidden = hidden.unsqueeze(1)
-        if hidden.size(1) != encoder_outputs.size(1):
-            hidden = hidden.expand(-1, encoder_outputs.size(1), -1)
-
-        # print("Shape of hidden:", hidden.shape)
-        # print("Shape of encoder_outputs:", encoder_outputs.shape)
+        hidden = hidden.unsqueeze(1)
 
         # Calculate the attention weights (energies) based on the given method
         match (self.method):
@@ -141,17 +136,19 @@ class Attention(nn.Module):
                 attn_energies = torch.sum(hidden * energy, dim=2)
             case "concat":
                 energy = self.attn(
-                    torch.cat((hidden.expand_as(encoder_outputs), encoder_outputs), 2)
+                    torch.cat((hidden.expand_as(encoder_outputs), encoder_outputs), -1)
                 ).tanh()
                 attn_energies = torch.sum(self.v * energy, dim=2)
             case _:
                 attn_energies = torch.sum(hidden * encoder_outputs, dim=2)
 
-        # Transpose max_length and batch_size dimensions
-        attn_energies = attn_energies.t()
+        # Return the softmax normalized probability scores across the sequence
+        attn_weights = F.softmax(attn_energies, dim=1).unsqueeze(1)
 
-        # Return the softmax normalized probability scores (with added dimension)
-        return F.softmax(attn_energies, dim=1).unsqueeze(1)
+        # Compute context vectors
+        context = attn_weights.bmm(encoder_outputs)
+
+        return context, attn_weights
 
 
 class RNN(Model):
@@ -197,7 +194,9 @@ class RNN(Model):
 
         if self.options["attention"] is not None:
             self.attention = Attention(
-                input_size, self.options["attention"], self.options["device"]
+                input_size,
+                self.options["attention"],
+                self.options["device"],
             ).to(self.options["device"])
 
         self.lin_layers = nn.ModuleList(
@@ -233,10 +232,10 @@ class RNN(Model):
 
     def forward(self, x):
         x = x.float()
-        if len(x.shape) == 1:
-            x = x.unsqueeze(0)
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
+            x = x.transpose(0, 1)
+            x = x.repeat(1, int(np.rint(self.options["rnn_seq_len"] / x.size(1))), 1)
 
         batch_size = x.size(0)
         if self.hidden is None or not self.options["timeseries"]:
@@ -296,19 +295,15 @@ class RNN(Model):
         # Fully connected layers
         def fc(x):
             for lin, drop in zip(self.lin_layers, self.drops):
-                x = F.mish(lin(x))
-                x = drop(x)
+                x = drop(F.mish(lin(x)))
             return x
 
         # attention weights and context vectors
         if self.options["attention"] is not None:
 
             def attn(x, query, rnn_out):
-                attn_weights = self.attention(query, x)
-                context = attn_weights.transpose(0, 2).bmm(x)
-                context = context.squeeze(
-                    1
-                )  # Ensure context has shape [batch_size, hidden_dim]
+                context, attn_weights = self.attention(query, x)
+                context = context.view(-1, context.size(-1))
 
                 # Concatenate context vector with the last hidden state from RNN
                 return torch.cat((rnn_out, context), 1)

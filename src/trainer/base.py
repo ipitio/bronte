@@ -68,6 +68,7 @@ class Model(nn.Module, ABC):
         self.best_epoch = 0
 
         # task
+        self.options["importance"] = True
         self.options["task"] = ""
         self.options["sample_size"] = 0
         self.options["verbose"] = 0
@@ -470,7 +471,7 @@ class Model(nn.Module, ABC):
             self.train_ds = DeepDataset(
                 self.X_train,
                 self.y_train,
-                self.options["rnn_seq_len"] if "RNN" in self.typeof else 0,
+                self.options["rnn_seq_len"] if "rnn" in self.typeof else 0,
                 self.options["batch_size"],
                 self.options["device"],
                 self.options["n_workers"],
@@ -483,7 +484,7 @@ class Model(nn.Module, ABC):
             self.valid_ds = DeepDataset(
                 self.X_valid,
                 self.y_valid,
-                self.options["rnn_seq_len"] if "RNN" in self.typeof else 0,
+                self.options["rnn_seq_len"] if "rnn" in self.typeof else 0,
                 self.options["batch_size"],
                 self.options["device"],
                 self.options["n_workers"],
@@ -534,6 +535,9 @@ class Model(nn.Module, ABC):
                 self.best_loss = avg_val_loss
                 self.best_epoch = self.epoch - 1
                 self.save()
+                # if loss is 0 then we can stop training
+                if self.best_loss == 0:
+                    break
             with torch.no_grad():
                 torch.cuda.empty_cache()
 
@@ -547,7 +551,7 @@ class Model(nn.Module, ABC):
         self.test_ds = DeepDataset(
             self.X_test,
             self.y_test,
-            self.options["rnn_seq_len"] if "RNN" in self.typeof else 0,
+            self.options["rnn_seq_len"] if "rnn" in self.typeof else 0,
             self.options["batch_size"],
             self.options["device"],
             self.options["n_workers"],
@@ -613,7 +617,9 @@ class Model(nn.Module, ABC):
         rg = np.random.default_rng(42)
         num_train = len(self.X_train) - 1
         indices = rg.choice(
-            num_train, min(1000 if self.options["use_cuda"] else 10, num_train), False
+            num_train - 1,
+            min(1000 if self.options["use_cuda"] else 10, num_train),
+            False,
         )
         X_train_sampled = self.X_train.loc[self.X_train.index.isin(indices)]
         if isinstance(X_train_sampled, dd.DataFrame):
@@ -751,7 +757,8 @@ class Model(nn.Module, ABC):
 
         self.fits += 1
         self.performance()
-        self.importance()
+        if self.options["importance"]:
+            self.importance()
         self.save()
         self.save(
             f"{self.output_dir}/{self.typeof}/{self.name}/{self.fits - 1}/model.pt",
@@ -774,7 +781,7 @@ class Model(nn.Module, ABC):
         if isinstance(X, pd.DataFrame) or isinstance(X, pd.Series):
             X = X.to_numpy().astype(np.float32)
         X = torch.from_numpy(X).to(self.options["device"])
-        if "RNN" in self.typeof:
+        if "rnn" in self.typeof:
             self.hidden = None
         with torch.no_grad():
             return self(X)

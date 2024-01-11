@@ -212,10 +212,12 @@ class Regression(Model):
     def __init__(self):
         super().__init__()
         self.options["criterion"] = nn.HuberLoss(reduction="none")
+        self.options["num_out"] = []
 
     def preprocess(self, X, y):
         if y is not None:
-            self.options["num_out"] = [1] * len(y.columns)
+            if not self.options["num_out"]:
+                self.options["num_out"] = [1] * len(y.columns)
 
             clf = IsolationForest(random_state=42, n_jobs=-1, warm_start=True)
             clf.fit(y)
