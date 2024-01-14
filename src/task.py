@@ -50,7 +50,7 @@ class Classification(Model):
 
         return np.argmax(silhouette_scores) + 2
 
-    def preprocess(self, X, y):
+    def preprocess(self, X=None, y=None):
         if y is not None:
             self.options["num_out"] = []
             for i, col in enumerate(y.columns):
@@ -79,48 +79,76 @@ class Classification(Model):
                         # Otherwise, use the number of unique values as the number of classes
                         self.options["num_out"].append(len(y[col].unique()))
 
-        # Remove highly correlated features
-        corr = np.corrcoef(X.values, rowvar=False)
-        corr_matrix = np.abs(corr)
-        r, c = np.triu_indices(corr_matrix.shape[0], k=1)
-        to_drop = set()
-        for i, j in zip(r, c):
-            if corr_matrix[i, j] > self.options["max_corr"]:
-                to_drop.add(j)
-        X.drop(columns=X.columns[list(to_drop)], inplace=True)
+        if X is not None:
+            # Remove highly correlated features
+            corr = np.corrcoef(X.values, rowvar=False)
+            corr_matrix = np.abs(corr)
+            r, c = np.triu_indices(corr_matrix.shape[0], k=1)
+            to_drop = set()
+            for i, j in zip(r, c):
+                if corr_matrix[i, j] > self.options["max_corr"]:
+                    to_drop.add(j)
+            X.drop(columns=X.columns[list(to_drop)], inplace=True)
 
         return X, y
 
-    def score(self, X, y):
-        return [
-            accuracy(
-                self.predict(X), y, "multiclass", num_classes=self.options["num_out"][i]
-            ).item()
-            for i, _ in enumerate(self.y.columns)
-        ].mean()
+    def score(self, pred, y, raw_labels=True):
+        if raw_labels:
+            _, y = self.preprocess(y=y)
+        return np.mean(
+            [
+                accuracy(
+                    pred[i],
+                    y[i],
+                    "multiclass",
+                    num_classes=self.options["num_out"][i],
+                ).item()
+                for i, _ in enumerate(y.columns)
+            ]
+        )
 
-    def performance(self):
+    def performance(self, labels=None, predictions=None, raw_labels=True):
         if self is not None:
-            self.accuracy = []
-            self.f1 = []
-            self.precision = []
-            self.recall = []
-            self.auroc = []
+            self.metrics = {
+                "accuracy": [],
+                "f1": [],
+                "precision": [],
+                "recall": [],
+                "auroc": [],
+                "cm": [],
+            }
+
+            if labels is None:
+                labels = self.labels
+            elif raw_labels:
+                _, labels = self.preprocess(y=labels)
+            if predictions is None:
+                predictions = self.predictions
+
+            if not isinstance(labels, list):
+                labels = [labels]
+            if not isinstance(predictions, list):
+                predictions = [predictions]
+
             for i, col in enumerate(self.y.columns):
                 if len(self.y.columns) > 1:
                     index = self.y.columns.get_loc(col)
-                    y = self.labels[:, index] if self.labels.ndim > 1 else self.labels
+                    y = labels[:, index] if len(np.shape(labels)) > 1 else labels
                     preds = (
-                        self.predictions[:, index]
-                        if self.predictions.ndim > 1
+                        predictions[:, index]
+                        if len(np.shape(predictions)) > 1
                         else self.predictions
                     )
                 else:
-                    y = self.labels.flatten() if self.labels.ndim > 1 else self.labels
+                    y = (
+                        np.array(labels).flatten().tolist()
+                        if len(np.shape(labels)) > 1
+                        else labels
+                    )
                     preds = (
-                        self.predictions.flatten()
-                        if self.predictions.ndim > 1
-                        else self.predictions
+                        np.array(predictions).flatten().tolist()
+                        if len(np.shape(predictions)) > 1
+                        else predictions
                     )
 
                 if len(preds) == 0 or len(y) == 0:
@@ -204,11 +232,12 @@ class Classification(Model):
                 if self.options["verbose"]:
                     plt.show()
 
-                self.accuracy.append(float(accuracy_score))
-                self.f1.append(float(f1))
-                self.precision.append(float(precision_score))
-                self.recall.append(float(recall_score))
-                self.auroc.append(float(auroc_score) if auroc_score else 0)
+                self.metrics["accuracy"].append(float(accuracy_score))
+                self.metrics["f1"].append(float(f1))
+                self.metrics["precision"].append(float(precision_score))
+                self.metrics["recall"].append(float(recall_score))
+                self.metrics["auroc"].append(float(auroc_score) if auroc_score else 0)
+                self.metrics["cm"].append(cm)
 
 
 class Regression(Model):
@@ -217,7 +246,7 @@ class Regression(Model):
         self.options["criterion"] = nn.HuberLoss(reduction="none")
         self.options["num_out"] = []
 
-    def preprocess(self, X, y):
+    def preprocess(self, X=None, y=None):
         if y is not None:
             if not self.options["num_out"]:
                 self.options["num_out"] = [1] * len(y.columns)
@@ -228,60 +257,87 @@ class Regression(Model):
             y = y[mask]
             X = X[mask]
 
-        for lim in np.arange(self.options["max_corr"], 0, -0.01):
-            # Remove highly correlated features
-            corr = np.corrcoef(X.values, rowvar=False)
-            corr_matrix = np.abs(corr)
-            r, c = np.triu_indices(corr_matrix.shape[0], k=1)
-            to_drop = set()
-            for i, j in zip(r, c):
-                if corr_matrix[i, j] > lim:
-                    to_drop.add(j)
-            X_dropped = X.drop(columns=X.columns[list(to_drop)])
+        if X is not None:
+            for lim in np.arange(self.options["max_corr"], 0, -0.01):
+                # Remove highly correlated features
+                corr = np.corrcoef(X.values, rowvar=False)
+                corr_matrix = np.abs(corr)
+                r, c = np.triu_indices(corr_matrix.shape[0], k=1)
+                to_drop = set()
+                for i, j in zip(r, c):
+                    if corr_matrix[i, j] > lim:
+                        to_drop.add(j)
+                X_dropped = X.drop(columns=X.columns[list(to_drop)])
 
-            # Define the transformations pipeline
-            transformers = Pipeline(
-                [
-                    (
-                        "normality",
-                        QuantileTransformer(
-                            output_distribution="normal",
-                            random_state=42,
-                            copy=False,
+                # Define the transformations pipeline
+                transformers = Pipeline(
+                    [
+                        (
+                            "normality",
+                            QuantileTransformer(
+                                output_distribution="normal",
+                                random_state=42,
+                                copy=False,
+                            ),
                         ),
-                    ),
-                    ("variance", RobustScaler(unit_variance=True, copy=False)),
-                ]
-            )
-            # Apply the transformations on X
-            try:
-                X_transformed = transformers.fit_transform(X)
-                X = pd.DataFrame(X_transformed, columns=X.columns)
-                break
-            except np.linalg.LinAlgError:
-                pass
+                        ("variance", RobustScaler(unit_variance=True, copy=False)),
+                    ]
+                )
+                # Apply the transformations on X
+                try:
+                    X_transformed = transformers.fit_transform(X_dropped)
+                    X = pd.DataFrame(X_transformed, columns=X.columns)
+                    break
+                except np.linalg.LinAlgError:
+                    pass
 
         return X, y
 
-    def score(self, X, y):
-        self.r2 = r2_score(self.predict(X), y)
-        return self.r2
+    def score(self, pred, y, raw_labels=True):
+        if raw_labels:
+            _, y = self.preprocess(y=y)
+        return np.mean(
+            [
+                r2_score(
+                    pred[i],
+                    y[i],
+                    multioutput="variance_weighted",
+                )
+                for i, _ in enumerate(y.columns)
+            ]
+        )
 
-    def performance(self):
+    def performance(self, labels=None, predictions=None, raw_labels=True):
         if self is not None:
-            length = min(len(self.labels), len(self.predictions))
+            if labels is not None and raw_labels:
+                _, labels = self.preprocess(y=labels)
+            else:
+                labels = self.labels
+            if predictions is None:
+                predictions = self.predictions
+
+            if not isinstance(labels, list):
+                labels = [labels]
+            if not isinstance(predictions, list):
+                predictions = [predictions]
+
+            length = min(len(labels), len(predictions))
             preds = (
-                torch.tensor(
-                    self.predictions[:length], device=self.options["device"]
-                ).cpu()
-            ).squeeze()
-            y = torch.tensor(self.labels[:length], device=self.options["device"]).cpu()
+                torch.tensor(predictions[:length], device=self.options["device"])
+                .squeeze()
+                .cpu()
+            )
+            y = (
+                torch.tensor(labels[:length], device=self.options["device"])
+                .squeeze()
+                .cpu()
+            )
             if preds.ndim == 0 or y.ndim == 0:
                 return
             try:
                 rmse = mean_squared_error(preds, y, False, len(self.target_var))
                 mae = mean_absolute_error(preds, y)
-                r2 = r2_score(preds, y)
+                r2 = r2_score(preds, y, multioutput="variance_weighted")
                 corr = np.corrcoef(preds, y)[0, 1]
             except:
                 print("preds", preds)
@@ -360,7 +416,9 @@ class Regression(Model):
                     plt.show()
                     print(f"Correlation Coefficient: {corr}")
 
-            self.r2 = float(r2)
-            self.rmse = float(rmse)
-            self.mae = float(mae)
-            self.corr = float(corr)
+            self.metrics = {
+                "r2": float(r2),
+                "rmse": float(rmse),
+                "mae": float(mae),
+                "corr": float(corr),
+            }

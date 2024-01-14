@@ -85,6 +85,7 @@ class Model(nn.Module, ABC):
         self.studies = "/".join([self.output_dir, "tuning.db"])
         self.writer = None
         self.best_epoch = 0
+        self.metrics = {}
 
         # task
         self.options["importance"] = True
@@ -130,7 +131,7 @@ class Model(nn.Module, ABC):
         self.options["restart"] = False
 
     @abstractmethod
-    def preprocess(self, X, y):
+    def preprocess(self, X=None, y=None):
         return X, y
 
     @abstractmethod
@@ -191,6 +192,9 @@ class Model(nn.Module, ABC):
 
         if self.options["task"] and self.options["arch"]:
             self.typeof = " ".join([self.options["task"], self.options["arch"]])
+
+        if not isinstance(self.options["num_out"], list):
+            self.options["num_out"] = [self.options["num_out"]] * len(self.target_var)
 
         return self
 
@@ -808,8 +812,11 @@ class Model(nn.Module, ABC):
             gc.collect()
         return self
 
-    def predict(self, X):
-        X, _ = self.preprocess(X, None)
+    def predict(self, X=None):
+        if X is not None:
+            X, _ = self.preprocess(X)
+        else:
+            X = self.X_test
         self.eval()
         if isinstance(X, dd.DataFrame):
             X = X.compute()
