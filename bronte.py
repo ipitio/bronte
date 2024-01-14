@@ -222,6 +222,7 @@ def fit(models=None):
     if models is None:
         models = request.get_json()
 
+    trainers = []
     for task_type in models["tasks"]:
         for task in models["tasks"][task_type]:
             tables = pd.read_sql(
@@ -242,12 +243,11 @@ def fit(models=None):
                         data = pd.read_sql(f"SELECT * FROM {table}", db)
                         if trainer.fit(data) != 0 or i >= options["samples"] - 1:
                             break
-            db.close()
-
+                trainers.append(trainer)
     try:
         return jsonify({"message": "Models trained successfully"}), 200
     except:
-        pass
+        return trainers
 
 
 @app.route("/logs", methods=["GET"])
@@ -275,7 +275,7 @@ def predict(X=None, trainers=[]):
                     and not file.split(".")[0].lstrip("-").isdigit()
                 ):
                     trainers.append(os.path.join(root, file))
-    predictions = {}
+    predictions = []
     for trainer in trainers:
         model = Bronte(path=trainer).model
         targets = model.target_var
@@ -283,14 +283,14 @@ def predict(X=None, trainers=[]):
         preds = model.predict(X)
         if not isinstance(preds, list):
             preds = [preds]
-        predictions[trainer] = preds
+        predictions.append(preds)
         for pred, target in zip(preds, targets):
             print(f"Head of {target} predictions:\n{pred[:10]}\n")
 
     try:
         return jsonify(predictions), 200
     except:
-        pass
+        return predictions
 
 
 if __name__ == "__main__":

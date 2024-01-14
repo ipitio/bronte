@@ -27,13 +27,28 @@ It is composed of the following modules:
 
 ### Training
 
-    trainer = Bronte(task | arch)
+#### Single
+
+    from bronte import Bronte
+    model = task | arch
+    trainer = Bronte(model)
     trainer.fit(data)
+
+#### Batch
+
+    import bronte
+    bronte.flush() # flush db
+    bronte.load(data) # load data into a table
+    models = [task | arch, task2 | arch2]
+    trainers = bronte.fit(models) # train models on all tables
 
 ### Inference
 
-    trainer = Bronte(path="model.pt")
+    trainer = Bronte(path="models/.../model.pt")
     y = trainer.predict(X)
+    # or
+    trainers = ["models/.../model.pt", "models/.../model2.pt"]
+    ys = bronte.predict(X, trainers)
 
 ## Features
 
