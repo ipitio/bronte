@@ -42,8 +42,8 @@ class Classification(Model):
 
         # estimate using Silhouette Analysis
         silhouette_scores = []
-        for k in range(2, min(self.options["max_clusters"] + 1, len(data))):
-            km = KMeans(n_clusters=k, random_state=42, n_init="auto", algorithm="auto")
+        for k in range(2, min(self.options["max_clusters"], len(np.unique(data))) + 1):
+            km = KMeans(n_clusters=k, random_state=42, n_init="auto")
             labels = km.fit_predict(data)
             silhouette_avg = silhouette_score(data, labels)
             silhouette_scores.append(silhouette_avg)
@@ -80,6 +80,9 @@ class Classification(Model):
                         self.options["num_out"].append(len(y[col].unique()))
 
         if X is not None:
+            # remove features with zero variance
+            variances = X.var()
+            X = X = X[variances[variances > 0].index]
             # Remove highly correlated features
             corr = np.corrcoef(X.values, rowvar=False)
             corr_matrix = np.abs(corr)
@@ -133,9 +136,9 @@ class Classification(Model):
             for i, col in enumerate(self.y.columns):
                 if len(self.y.columns) > 1:
                     index = self.y.columns.get_loc(col)
-                    y = labels[:, index] if len(np.shape(labels)) > 1 else labels
+                    y = labels[:, i] if len(np.shape(labels)) > 1 else labels
                     preds = (
-                        predictions[:, index]
+                        predictions[:, i]
                         if len(np.shape(predictions)) > 1
                         else self.predictions
                     )
@@ -255,9 +258,13 @@ class Regression(Model):
             clf.fit(y)
             mask = clf.predict(y) == 1
             y = y[mask]
-            X = X[mask]
+            if X is not None:
+                X = X[mask]
 
         if X is not None:
+            # remove features with zero variance
+            variances = X.var()
+            X = X = X[variances[variances > 0].index]
             for lim in np.arange(self.options["max_corr"], 0, -0.01):
                 # Remove highly correlated features
                 corr = np.corrcoef(X.values, rowvar=False)
@@ -272,21 +279,22 @@ class Regression(Model):
                 # Define the transformations pipeline
                 transformers = Pipeline(
                     [
+                        ("scale", RobustScaler(unit_variance=True, copy=False)),
                         (
-                            "normality",
+                            "center",
                             QuantileTransformer(
                                 output_distribution="normal",
                                 random_state=42,
                                 copy=False,
                             ),
                         ),
-                        ("variance", RobustScaler(unit_variance=True, copy=False)),
-                    ]
+                    ],
+                    verbose=self.options["verbose"] > 1,
                 )
                 # Apply the transformations on X
                 try:
                     X_transformed = transformers.fit_transform(X_dropped)
-                    X = pd.DataFrame(X_transformed, columns=X.columns)
+                    X = pd.DataFrame(X_transformed, columns=X_dropped.columns)
                     break
                 except np.linalg.LinAlgError:
                     pass
@@ -323,12 +331,14 @@ class Regression(Model):
 
             length = min(len(labels), len(predictions))
             preds = (
-                torch.tensor(predictions[:length], device=self.options["device"])
+                torch.tensor(
+                    np.array(predictions[:length]), device=self.options["device"]
+                )
                 .squeeze()
                 .cpu()
             )
             y = (
-                torch.tensor(labels[:length], device=self.options["device"])
+                torch.tensor(np.array(labels[:length]), device=self.options["device"])
                 .squeeze()
                 .cpu()
             )

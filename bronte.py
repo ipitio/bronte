@@ -1,72 +1,20 @@
 import os
-from re import sub
 import subprocess
-import sys
-import traceback
-import warnings
-
-verbose = 1
-verbose = min(max(verbose, 0), 3)
-colab = False
-try:
-    from google.colab import drive
-
-    colab = True
-    drive.mount("/content/drive", force_remount=True)
-    drive_dir = "bronte"  # @param {type:"string"}
-    path = "/".join(["drive", "MyDrive", drive_dir])
-    os.chdir(path)
-except:
-    pass
-
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
-
-os.chdir(os.path.dirname(os.path.realpath(__file__)))
-
-# This will install the packages below. If you use an environment manager, comment this
-# out and make sure the packages in requirements.txt are installed in your environment.
-if verbose:
-    print("Fetching any missing dependencies...")
-reqs = subprocess.check_output([sys.executable, "-m", "pip", "freeze"])
-installed = [r.decode().split("==")[0] for r in reqs.split()]
-failure = []
-with open("requirements.txt", "r") as dependencies:
-    pkgs = dependencies.readlines()
-    if colab:
-        pkgs.append("torch_xla\n")
-    for pkg in pkgs:  # to ignore errors
-        # if pkg is a comment or empty line
-        if pkg.startswith("#") or len(pkg.strip()) == 0:
-            continue
-        pkg = pkg.strip()
-        args = f"pip install {pkg} {' '.join(['-q' for _ in range(max(2, verbose) - verbose)])} --break-system-packages"
-        if pkg not in installed and subprocess.call(args.split()) != 0:
-            failure.append(pkg)
-
-if len(failure) > 0 and failure[0]:
-    print("Failed to install the following packages: " + str(failure))
-    print("Try installing them manually.")
-    raise SystemExit(1)
-elif verbose:
-    print("All dependencies are installed.")
-
-warnings.filterwarnings("ignore")
-
 import torch
+import traceback
 import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import create_engine, pool
 from torch import nn
 from src.arch import FFN, RNN
 from src.task import Classification, Regression
-
-# set seeds for reproducibility
-torch.manual_seed(42)
-np.random.seed(42)
-
+try:
+    from google.colab import drive
+    colab = True
+except:
+    colab = False
+verbose = 1 # 0-3
 
 class Bronte:
     archs = {"ffn": FFN, "rnn": RNN}
@@ -157,7 +105,7 @@ class Bronte:
                 except ValueError:
                     pass
 
-        data = pd.get_dummies(df, dtype=np.int8, sparse=True)
+        data = pd.get_dummies(df, dtype=np.int8)
         if not options["timeseries"]:
             X = data.drop(columns=options["targets"])
             y = data[options["targets"]]
@@ -177,24 +125,37 @@ class Bronte:
         return self.model.predict(X)
 
 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
+if colab:
+    drive.mount("/content/drive", force_remount=True)
+    drive_dir = "bronte"  # @param {type:"string"}
+    path = "/".join(["drive", "MyDrive", drive_dir])
+    os.chdir(path)
+else:
+    os.chdir(os.path.dirname(os.path.realpath(__file__)))
+
+# set seeds for reproducibility
+torch.manual_seed(42)
+np.random.seed(42)
+
 app = Flask(__name__)
 
 engine = create_engine(
     "sqlite:///data/data.db",
     connect_args={"check_same_thread": False},
     poolclass=pool.SingletonThreadPool,
-    echo=True,
+    echo=verbose > 2,
 )
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///data/data.db"
-app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"connect_args": {"check_same_thread": False}}
-db = SQLAlchemy(app)
 prefix = "bronte_"
 idx = 0
 
+tensorboard = None
 
 @app.route("/flush", methods=["GET"])
 def flush():
-    cursor = db.cursor()
+    cursor = engine.raw_connection().cursor()
     for row in cursor.execute("SELECT name FROM sqlite_master WHERE type='table';"):
         cursor.execute(f"DROP TABLE {row[0]}")
     try:
@@ -209,7 +170,7 @@ def load(data=None):
         data = request.get_json()["data"]
     df = pd.read_json(data)
     global idx
-    df.to_sql(f"{prefix}{idx}", db, if_exists="replace", index=False)
+    df.to_sql(f"{prefix}{idx}", engine, if_exists="replace", index=False)
     idx += 1
     try:
         return jsonify({"message": f"Data loaded into table {prefix}{idx}"}), 200
@@ -226,7 +187,7 @@ def fit(models=None):
     for task_type in models["tasks"]:
         for task in models["tasks"][task_type]:
             tables = pd.read_sql(
-                "SELECT name FROM sqlite_master WHERE type='table';", db
+                "SELECT name FROM sqlite_master WHERE type='table';", engine
             )
             for arch in models["archs"]:
                 options = task | arch
@@ -240,7 +201,7 @@ def fit(models=None):
                 trainer = Bronte(options, path)
                 for i, table in enumerate(tables["name"].tolist()):
                     if options["table_prefix"] in table:
-                        data = pd.read_sql(f"SELECT * FROM {table}", db)
+                        data = pd.read_sql(f"SELECT * FROM {table}", engine)
                         if trainer.fit(data) != 0 or i >= options["samples"] - 1:
                             break
                 trainers.append(trainer)
@@ -251,9 +212,17 @@ def fit(models=None):
 
 
 @app.route("/logs", methods=["GET"])
-def logs():
+def track():
+    global tensorboard
+    if tensorboard is not None:
+        tensorboard.terminate()
+        tensorboard = None
+        try:
+            return jsonify({"message": "Tensorboard server stopped"}), 200
+        except:
+            pass
     if not colab:
-        subprocess.Popen(["tensorboard", "--logdir=models", "--bind_all"])
+        tensorboard = subprocess.Popen(["tensorboard", "--logdir=models", "--bind_all"])
         try:
             return jsonify({"message": "Tensorboard server started"}), 200
         except:
@@ -261,31 +230,36 @@ def logs():
 
 
 @app.route("/predict", methods=["POST"])
-def predict(X=None, trainers=[]):
-    if X is None:
+def predict(XX=None, paths=[]):
+    if XX is None:
         try:
-            X = request.get_json()  # Get new data from the request
+            XX = request.get_json()  # Get new data from the request
         except:
-            pass  # Use test split from training data
-    if not trainers:
+            pass
+    if not isinstance(XX, list):
+        XX = [XX]
+    if not paths:
         for root, _, files in os.walk("models"):
             for file in files:
                 if (
                     file.endswith(".pt")
                     and not file.split(".")[0].lstrip("-").isdigit()
                 ):
-                    trainers.append(os.path.join(root, file))
-    predictions = []
-    for trainer in trainers:
-        model = Bronte(path=trainer).model
+                    paths.append(os.path.join(root, file))
+    predictions = {}
+    for path in paths:
+        model = Bronte(path=path).model
         targets = model.target_var
-        print(f"Predicting {targets} with {trainer}...\n")
-        preds = model.predict(X)
-        if not isinstance(preds, list):
-            preds = [preds]
-        predictions.append(preds)
-        for pred, target in zip(preds, targets):
-            print(f"Head of {target} predictions:\n{pred[:10]}\n")
+        for i, X in enumerate(XX):
+            if verbose:
+                print(f"Predicting {targets} with {path}...\n")
+            preds = model.predict(X)
+            if not isinstance(preds, list):
+                preds = [preds.squeeze()]
+            predictions[path] = {str(i): preds}
+            if verbose:
+                for pred, target in zip(preds, targets):
+                    print(f"Head of {target} predictions:\n{pred.squeeze()[:10]}\n")
 
     try:
         return jsonify(predictions), 200

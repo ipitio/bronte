@@ -15,6 +15,13 @@ class DeepLoss:
 
         for i, pred in enumerate(preds):
             target = y[:, i]
+
+            # if pred or y has an extra dimension, remove it
+            if pred.ndim > target.ndim:
+                pred = pred.squeeze()
+            elif target.ndim > pred.ndim:
+                target = target.squeeze()
+
             minlen = min(len(pred), len(target))
             pred = pred[:minlen]
             target = target[:minlen]

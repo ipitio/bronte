@@ -552,7 +552,7 @@ class Model(nn.Module, ABC):
                 self.trial.report(avg_val_loss, self.epoch)
                 if self.trial.should_prune():
                     raise optuna.TrialPruned()
-            self.scheduler.step(avg_val_loss, self.epoch)
+            self.scheduler.step(avg_val_loss)
             self.epoch += 1
             # If the validation losses is at a new minimum, save the model state
             if avg_val_loss < self.best_loss:
@@ -813,10 +813,11 @@ class Model(nn.Module, ABC):
         return self
 
     def predict(self, X=None):
-        if X is not None:
-            X, _ = self.preprocess(X)
-        else:
+        if X is None:
             X = self.X_test
+        else:
+            X, _ = self.preprocess(X)
+
         self.eval()
         if isinstance(X, dd.DataFrame):
             X = X.compute()

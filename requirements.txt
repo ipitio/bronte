@@ -2,13 +2,14 @@ bokeh
 dask[distributed]
 dask-ml
 flask
-flask-sqlalchemy
+ipykernel
 joblib
 jupyter
 jupyter-server-proxy
 matplotlib
 numpy
 optuna
+pandas==2.0.3
 scikit-learn
 shap
 sqlalchemy

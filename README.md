@@ -4,20 +4,19 @@
 
 [![License: AGPL](https://img.shields.io/badge/License-AGPL-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-`Bronte` is a modular and extensible Deep Learning framework; It views a model not as layers, but as a trainer of layers, whose preprocessing and evaluation are task-specific. Like with `Pytorch Lightning`, this abstracts away training and allows for a clean separation of concerns, making it easy to modify, add, and experiment with different tasks and architectures. If you'd like to add a new task or architecture, you can do so by creating a new class in the appropriate module and adding it in `main`.
+`bronte` is a modular and extensible Deep Learning framework; It views a model not as layers, but a trainer of layers, whose preprocessing and evaluation are task-specific. Like with `Pytorch Lightning`, this abstracts away training and allows for a clean separation of concerns, making it easy to modify, add, and experiment with different tasks and architectures. If you'd like to add a new one, you can do so by creating a new class in the appropriate module and adding it in `bronte`.
 
 It is composed of the following modules:
 
-- `bronte`: Factory
-- `arch`: Architecture
+- `bronte`: Factory and Driver
+- `arch`: Layers and Forward Pass
 - `task`: Preprocessing and Evaluation
-- Trainer:
-  - `base`: Training
-  - `data`: Datasets
-  - `loss`: Loss calculations
-  - `tune`: Hyperparameter tuner
+- `base`: Training and Inference
+- `data`: Datasets
+- `loss`: Loss calculations
+- `tune`: Hyperparameter tuning
 
-`Bronte` takes a dictionary of options, including the names of a task and an arch, and creates a model. When data is passed to `Bronte`, it splits it into features X and target(s) y, and passes these to the model's `fit` method, which then initializes the layers, optimizer, scheduler, criterion, scaler, datasets, and dataloaders, and starts training. Please look at the notebook for a list of all the options (under Deep Learning > Options).
+`Bronte` the class takes a dictionary of options, including the names of a task and an arch, and creates a model. When data is passed to `Bronte`, it splits it into features X and target(s) y, and passes these to the model's `fit` method, which then initializes the layers, optimizer, scheduler, criterion, scaler, datasets, and dataloaders, and starts training. Please look at the notebook for a list of all currently supported options (under Deep Learning > Options).
 
 > **Note**
 >
@@ -27,36 +26,44 @@ It is composed of the following modules:
 
 ### Training
 
-#### Single
-
-    from bronte import Bronte
-    model = task | arch
-    trainer = Bronte(model)
-    trainer.fit(data)
-
-#### Batch
-
     import bronte
-    bronte.flush() # flush db
-    bronte.load(data) # load data into a table
-    models = [task | arch, task2 | arch2]
-    trainers = bronte.fit(models) # train models on all tables
+
+    data = [df]
+    models = [task | arch]
+
+    # load data into tables
+    for df in data:
+      bronte.load(df)
+
+    # start tensorboard
+    bronte.track()
+
+    # train models on tables, returning list of Bronte objects
+    trainers = bronte.fit(models)
+
+    # call again to stop tensorboard
+    bronte.track()
+
+    # flush db
+    bronte.flush()
 
 ### Inference
 
-    trainer = Bronte(path="models/.../model.pt")
-    y = trainer.predict(X)
-    # or
-    trainers = ["models/.../model.pt", "models/.../model2.pt"]
-    ys = bronte.predict(X, trainers)
+    import bronte
 
-## Features
+    XX = [X]
+    paths = ["models/.../model.pt"]
+
+    # predict on list of new data, returning dict: {path: {str(XX.index(X)): y}}
+    predictions = bronte.predict(XX, paths)
+
+## Supports
 
 - Training:
   - (C/G/T)PU
-  - Persistent
+  - Persistence
   - Mixed Precision
-  - Multi-task
+  - Multi input and output
   - Model and state checkpointing
   - Learning Rate scheduling
   - Transfer Learning
@@ -64,7 +71,7 @@ It is composed of the following modules:
   - Parallel and Distributed with `dask`
   - Hyperparameter tuning with `optuna`
   - Calculating feature importances with `shap`
-  - Logging with `tensorboard`
+  - Monitoring/Logging with `tensorboard`
 - Tasks:
   - Regression
   - Classification
@@ -80,7 +87,7 @@ It is composed of the following modules:
 
 ## Example
 
-The notebook `basketball.ipynb` runs an ETL Pipeline for, and performs Deep Learning using, `Bronte`, with a sample dataset of Basketball statistics.
+The notebook `basketball.ipynb` runs an ETL Pipeline for a sample dataset of Basketball statistics and performs Deep Learning using `Bronte`.
 
 ### ETL Pipeline
 
